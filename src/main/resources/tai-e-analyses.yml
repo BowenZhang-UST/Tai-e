@@ -160,3 +160,7 @@
 - description: find the method that may drop or ignore exceptions
   analysisClass: pascal.taie.analysis.bugfinder.DroppedException
   id: dropped-exception
+
+- description: Jellyfish transpiler
+  analysisClass: prism.jellyfish.JellyFish
+  id: jelly-fish
