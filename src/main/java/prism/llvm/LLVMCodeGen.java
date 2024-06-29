@@ -62,7 +62,7 @@ public class LLVMCodeGen {
 
 
     /*
-     * Types Builders
+     * Type Builders
      */
     public LLVMTypeRef buildFunctionType(LLVMTypeRef retType, List<LLVMTypeRef> paramTypes) {
         ArrayBuilder<LLVMTypeRef> paramTypeArray = new ArrayBuilder<>();

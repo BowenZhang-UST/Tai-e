@@ -15,7 +15,7 @@ import pascal.taie.language.classes.ClassHierarchy;
 import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
-import pascal.taie.language.type.Type;
+import pascal.taie.language.type.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -100,13 +100,24 @@ public class JellyFish extends ProgramAnalysis<Void>  {
         String methodName = StringUtil.getMethodName(jclass, jmethod);
         List<LLVMTypeRef> paramTypes = new ArrayList<>();
         for(Type jType: jmethod.getParamTypes()) {
-            LLVMTypeRef type = codeGen.buildIntType(64);
+            LLVMTypeRef type = tranType(jType);
             paramTypes.add(type);
         }
-        LLVMTypeRef retType = codeGen.buildIntType(64);
+        Type jRetType = jmethod.getReturnType();
+        LLVMTypeRef retType = tranType(jRetType);
         LLVMTypeRef funcType = codeGen.buildFunctionType(retType, paramTypes);
         LLVMValueRef func = codeGen.addFunction(methodName, funcType);
         return func;
+    }
+
+    public LLVMTypeRef tranType(Type jType) {
+        if(jType instanceof VoidType) {
+            LLVMTypeRef llvmVoidType = codeGen.buildVoidType();
+            return llvmVoidType;
+        } else {
+            LLVMTypeRef defaultType = codeGen.buildIntType(64);
+            return defaultType;
+        }
     }
 
 }
