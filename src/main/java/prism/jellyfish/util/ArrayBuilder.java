@@ -1,4 +1,5 @@
 package prism.jellyfish.util;
+
 import java.util.ArrayList;
 
 import org.bytedeco.javacpp.Pointer;
@@ -7,6 +8,7 @@ import org.bytedeco.javacpp.PointerPointer;
 
 public class ArrayBuilder<T extends Pointer> {
     ArrayList<T> elements;
+
     public ArrayBuilder() {
         this.elements = new ArrayList<T>();
     }

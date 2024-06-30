@@ -1,4 +1,5 @@
 package prism.llvm;
+
 import org.bytedeco.llvm.global.LLVM;
 import org.bytedeco.llvm.LLVM.LLVMContextRef;
 import org.bytedeco.llvm.LLVM.LLVMModuleRef;
@@ -6,6 +7,7 @@ import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
 import org.bytedeco.llvm.LLVM.LLVMBuilderRef;
 import prism.jellyfish.util.ArrayBuilder;
+
 import java.util.List;
 
 
@@ -26,6 +28,7 @@ public class LLVMCodeGen {
         this.module = LLVM.LLVMModuleCreateWithNameInContext(moduleName, context);
         this.builder = LLVM.LLVMCreateBuilderInContext(context);
     }
+
     /*
      * Top-level commands
      */
@@ -60,13 +63,12 @@ public class LLVMCodeGen {
      */
 
 
-
     /*
      * Type Builders
      */
     public LLVMTypeRef buildFunctionType(LLVMTypeRef retType, List<LLVMTypeRef> paramTypes) {
         ArrayBuilder<LLVMTypeRef> paramTypeArray = new ArrayBuilder<>();
-        for(LLVMTypeRef paramType : paramTypes) {
+        for (LLVMTypeRef paramType : paramTypes) {
             paramTypeArray.add(paramType);
         }
         LLVMTypeRef funcType = LLVM.LLVMFunctionType(retType, paramTypeArray.build(), paramTypeArray.length(), 0);
@@ -77,17 +79,25 @@ public class LLVMCodeGen {
         return LLVM.LLVMStructCreateNamed(context, name);
     }
 
-    public LLVMTypeRef buildIntType(int bits) {
-        return LLVM.LLVMIntType(bits);
-    }
-
     public LLVMTypeRef buildVoidType() {
         return LLVM.LLVMVoidType();
     }
 
+    public LLVMTypeRef buildIntType(int bits) {
+        return LLVM.LLVMIntType(bits);
+    }
 
+    public LLVMTypeRef buildFloatType() {
+        return LLVM.LLVMFloatType();
+    }
 
+    public LLVMTypeRef buildDoubleType() {
+        return LLVM.LLVMDoubleType();
+    }
 
+    public LLVMTypeRef buildArrayType(LLVMTypeRef baseType, int length) {
+        return LLVM.LLVMArrayType(baseType, length);
+    }
 
 
 }
