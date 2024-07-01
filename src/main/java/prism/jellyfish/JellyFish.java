@@ -16,6 +16,7 @@ import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.*;
 
+import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -54,17 +55,18 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     @Override
     public Void analyze() {
-
+        // Pass 1
         List<JClass> jclasses = classHierarchy.applicationClasses().collect(Collectors.toList());
         for (JClass jclass : jclasses) {
             String className = jclass.getName();
             String moduleName = jclass.getModuleName();
             String simpleName = jclass.getSimpleName();
-            logger.info("Found class:\n name: {}, module name: {}, simple name:{}", className, moduleName, simpleName);
+//            logger.info("Found class:\n name: {}, module name: {}, simple name:{}", className, moduleName, simpleName);
 
-            LLVMTypeRef llvmClass = this.tranClass(jclass);
+            // Class
+            LLVMTypeRef llvmClass = getOrTranClass(jclass);
 
-
+            // Methods
             Collection<JMethod> methods = jclass.getDeclaredMethods();
             for (JMethod jmethod : methods) {
                 LLVMValueRef llvmMethod = this.tranMethod(jclass, jmethod);
@@ -76,8 +78,14 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 //         logger.info("        Stmt: {} ({})", stmt, ln);
                 //     }
             }
-
         }
+
+        // Pass 2
+        for (JClass jclass : maps.getAllClasses()) {
+            // Class fields: fill in the types.
+            this.tranClassFields(jclass);
+        }
+
         codeGen.generate();
         return null;
     }
@@ -91,7 +99,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMTypeRef existClass = llvmClass.get();
             return existClass;
         } else {
-            LLVMTypeRef newClass = tranClass(jclass);
+            LLVMTypeRef newClass = this.tranClass(jclass);
             return newClass;
         }
     }
@@ -102,21 +110,64 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     public LLVMTypeRef tranClass(JClass jclass) {
         String className = StringUtil.getClassName(jclass);
+        logger.info("Handle class: {}", className);
 
         LLVMTypeRef classType = codeGen.buildNamedStruct(className);
 
-        // A place holder value to let the type stay in bitcode.
+        // A placeholder value to let the type stay in bitcode.
         String placeHolderValName = String.format("placeholder.%s", className);
         LLVMValueRef phValue = codeGen.addGlobalVariable(placeHolderValName, classType);
         LLVM.LLVMSetLinkage(phValue, LLVM.LLVMWeakODRLinkage);
 
-        Collection<JField> fields = jclass.getDeclaredFields();
-        // TODO: handle fields
-
+        // Update mapping
         boolean ret = maps.setClassMap(jclass, classType);
         as.assertTrue(ret, String.format("The jclass %s has been duplicate translated.", className));
 
+        // After update: also translate the "relevant classes" by different types of reference
+        // 1. Field reference
+        Collection<JField> fields = jclass.getDeclaredFields();
+        for (JField field : fields) {
+            Type ftype = field.getType();
+            if (ftype instanceof ClassType) {
+                JClass fclass = ((ClassType) ftype).getJClass();
+                LLVMTypeRef fllvmClass = getOrTranClass(fclass);
+            }
+        }
+
+        // 2. Super-class reference
+        List<JClass> superClasses = new ArrayList<>();
+        JClass sclass = jclass.getSuperClass();
+        while (sclass != null) {
+            superClasses.add(sclass);
+            sclass = sclass.getSuperClass();
+        }
+        logger.info("    Superclasses: {}", superClasses);
+        for (JClass superClass : superClasses) {
+            LLVMTypeRef llvmSClass = getOrTranClass(superClass);
+        }
+
+        // 3. Interface reference
+        Collection<JClass> jinterfaces = jclass.getInterfaces();
+        for (JClass jinterface : jinterfaces) {
+            LLVMTypeRef llvmInterface = getOrTranClass(jinterface);
+        }
         return classType;
+    }
+
+    public LLVMTypeRef tranClassFields(JClass jclass) {
+        Optional<LLVMTypeRef> opllvmClass = maps.getClassMap(jclass);
+        as.assertTrue(opllvmClass.isPresent(), String.format("The class declaration of %s should have been translated.", jclass.getName()));
+        LLVMTypeRef llvmClass = maps.getClassMap(jclass).get();
+        Collection<JField> fields = jclass.getDeclaredFields();
+
+        List<LLVMTypeRef> fieldTypes = new ArrayList<>();
+        for (JField field : fields) {
+            Type ftype = field.getType();
+            LLVMTypeRef fllvmType = tranType(ftype);
+            fieldTypes.add(fllvmType);
+        }
+        codeGen.setStructFields(llvmClass, fieldTypes);
+        return llvmClass;
     }
 
     public LLVMValueRef tranMethod(JClass jclass, JMethod jmethod) {
@@ -169,7 +220,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 Type jBaseType = ((ArrayType) jType).baseType();
                 Type jElementType = ((ArrayType) jType).elementType();
                 int dimension = ((ArrayType) jType).dimensions();
-                logger.info("Array, base:{}, element:{}, dimension:{}", jBaseType, jElementType, dimension);
+
                 LLVMTypeRef baseType = this.tranType(jBaseType);
                 int arraySize = 0; // in java, array sizes are unknown.
 

@@ -8,6 +8,7 @@ import org.bytedeco.llvm.LLVM.LLVMValueRef;
 import org.bytedeco.llvm.LLVM.LLVMBuilderRef;
 import prism.jellyfish.util.ArrayBuilder;
 
+import java.lang.reflect.Array;
 import java.util.List;
 
 
@@ -67,16 +68,19 @@ public class LLVMCodeGen {
      * Type Builders
      */
     public LLVMTypeRef buildFunctionType(LLVMTypeRef retType, List<LLVMTypeRef> paramTypes) {
-        ArrayBuilder<LLVMTypeRef> paramTypeArray = new ArrayBuilder<>();
-        for (LLVMTypeRef paramType : paramTypes) {
-            paramTypeArray.add(paramType);
-        }
+        ArrayBuilder<LLVMTypeRef> paramTypeArray = new ArrayBuilder<>(paramTypes);
         LLVMTypeRef funcType = LLVM.LLVMFunctionType(retType, paramTypeArray.build(), paramTypeArray.length(), 0);
         return funcType;
     }
 
     public LLVMTypeRef buildNamedStruct(String name) {
         return LLVM.LLVMStructCreateNamed(context, name);
+    }
+
+    public void setStructFields(LLVMTypeRef struct, List<LLVMTypeRef> fieldTypes) {
+        ArrayBuilder<LLVMTypeRef> fieldTypeArray = new ArrayBuilder<>(fieldTypes);
+        LLVM.LLVMStructSetBody(struct, fieldTypeArray.build(), fieldTypeArray.length(), 0);
+        return;
     }
 
     public LLVMTypeRef buildVoidType() {
