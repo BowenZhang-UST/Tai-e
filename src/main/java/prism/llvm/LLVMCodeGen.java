@@ -103,5 +103,13 @@ public class LLVMCodeGen {
         return LLVM.LLVMArrayType(baseType, length);
     }
 
+    /*
+     * Value Builders
+     */
+    public LLVMValueRef buildGlobalVar(LLVMTypeRef type, String name) {
+        LLVMValueRef global = LLVM.LLVMAddGlobal(module, type, name);
+        return global;
+    }
+
 
 }

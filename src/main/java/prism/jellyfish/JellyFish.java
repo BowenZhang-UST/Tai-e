@@ -70,7 +70,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             Collection<JMethod> methods = jclass.getDeclaredMethods();
             for (JMethod jmethod : methods) {
                 LLVMValueRef llvmMethod = this.tranMethod(jclass, jmethod);
-                //     String methodName = method.getName();
+//                     String methodName = method.getName();
                 //     logger.info("    Method: {}", methodName);
                 //     IR ir = method.getIR();
                 //     for(Stmt stmt :ir.getStmts()) {
@@ -162,8 +162,14 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
         List<LLVMTypeRef> fieldTypes = new ArrayList<>();
         for (JField field : fields) {
+            String fieldName = field.getName();
             Type ftype = field.getType();
             LLVMTypeRef fllvmType = tranType(ftype);
+            if (field.isStatic()) {
+                String staticFieldName = StringUtil.getStaticFieldName(jclass, field);
+                codeGen.buildGlobalVar(fllvmType, staticFieldName);
+                continue;
+            }
             fieldTypes.add(fllvmType);
         }
         codeGen.setStructFields(llvmClass, fieldTypes);
@@ -173,6 +179,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
     public LLVMValueRef tranMethod(JClass jclass, JMethod jmethod) {
         String methodName = StringUtil.getMethodName(jclass, jmethod);
         List<LLVMTypeRef> paramTypes = new ArrayList<>();
+        if (!jmethod.isStatic()) {
+            LLVMTypeRef llvmClassType = getOrTranClass(jclass);
+            paramTypes.add(llvmClassType);
+        }
         for (Type jType : jmethod.getParamTypes()) {
             LLVMTypeRef type = tranType(jType);
             paramTypes.add(type);
