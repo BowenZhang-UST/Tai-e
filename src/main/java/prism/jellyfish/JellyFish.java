@@ -304,26 +304,14 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
         if (jstmt instanceof DefinitionStmt) { // Abstract
             if (jstmt instanceof AssignStmt) { // Abstract
-                if (jstmt instanceof AssignLiteral) {
-                    Var var = ((AssignLiteral) jstmt).getLValue();
-                    Literal lit = ((AssignLiteral) jstmt).getRValue();
-                    LLVMValueRef ptr = tranLValue(var);
-                    LLVMValueRef litVal = tranRValue(lit);
-                    LLVMValueRef store = codeGen.buildStore(ptr, litVal);
-                    return store;
-                } else if (jstmt instanceof FieldStmt) { // Abstract
-                    if (jstmt instanceof StoreField) {
-                        Var var = ((StoreField) jstmt).getRValue();
-                        LLVMValueRef varVal = tranRValue(var);
-
-                        FieldAccess fieldAccess = ((StoreField) jstmt).getLValue();
-                        LLVMValueRef ptr = tranLValue(fieldAccess);
-
-                        LLVMValueRef store = codeGen.buildStore(ptr, varVal);
-                        return store;
-                    }
-                }
-                // Ignore the other assign types for now
+                // We don't traverse each concrete assign types.
+                // They are all translated to stores.
+                LValue lvalue = ((AssignStmt<?, ?>) jstmt).getLValue();
+                RValue rvalue = ((AssignStmt<?, ?>) jstmt).getRValue();
+                LLVMValueRef llvmPtr = tranLValue(lvalue);
+                LLVMValueRef llvmValue = tranRValue(rvalue);
+                LLVMValueRef store = codeGen.buildStore(llvmPtr, llvmValue);
+                return store;
             } else if (jstmt instanceof Invoke) {
                 // TODO:
             }
