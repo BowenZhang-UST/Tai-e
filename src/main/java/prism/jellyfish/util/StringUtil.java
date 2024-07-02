@@ -6,7 +6,7 @@ import pascal.taie.ir.exp.Var;
 import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
-import prism.jellyfish.Mappings;
+
 
 public class StringUtil {
     private static final Logger logger = LogManager.getLogger(StringUtil.class);
@@ -40,4 +40,5 @@ public class StringUtil {
         String realVarName = varName.substring(1);
         return String.format("load.%s", realVarName);
     }
+
 }

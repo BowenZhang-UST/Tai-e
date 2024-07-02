@@ -20,11 +20,8 @@ import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.*;
 
 import java.lang.invoke.MethodHandles;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
-import java.util.Collection;
-import java.util.Optional;
 
 
 import org.bytedeco.llvm.LLVM.LLVMTypeRef;
@@ -34,8 +31,12 @@ import org.bytedeco.llvm.global.LLVM;
 import prism.jellyfish.util.AssertUtil;
 import prism.llvm.LLVMCodeGen;
 import prism.jellyfish.util.StringUtil;
+import prism.llvm.LLVMUtil;
 
-import javax.swing.text.html.Option;
+import static prism.llvm.LLVMUtil.getElementType;
+import static prism.llvm.LLVMUtil.getValueType;
+import static prism.llvm.LLVMUtil.getLLVMStr;
+
 
 public class JellyFish extends ProgramAnalysis<Void> {
     public static final String ID = "jelly-fish";
@@ -199,8 +200,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMTypeRef llvmByteType = codeGen.buildIntType(8);
                 return llvmByteType;
             } else if (jType instanceof CharType) {
-                LLVMTypeRef llvmCharnType = codeGen.buildIntType(16);
-                return llvmCharnType;
+                LLVMTypeRef llvmCharType = codeGen.buildIntType(16);
+                return llvmCharType;
             } else if (jType instanceof ShortType) {
                 LLVMTypeRef llvmShortType = codeGen.buildIntType(16);
                 return llvmShortType;
@@ -237,7 +238,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMTypeRef llvmClass = getOrTranClass(jclass);
                 return llvmClass;
             } else if (jType instanceof NullType) {
-                as.unreachable("Null type is not a real type");
+                as.unreachable("We don't translate Null Type");
             }
         } else if (jType instanceof BottomType) {
             as.unimplemented();
@@ -284,6 +285,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         List<Var> vars = ir.getVars();
         for (Var var : vars) {
             Type jvarType = var.getType();
+            if (jvarType instanceof NullType) continue;
             LLVMTypeRef llvmVarType = tranType(jvarType);
             String llvmVarName = StringUtil.getVarNameAsPtr(var);
             LLVMValueRef alloca = codeGen.buildAlloca(llvmVarType, llvmVarName);
@@ -300,16 +302,45 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public LLVMValueRef tranStmt(Stmt jstmt) {
-        logger.info("Stmt: {}. {}", jstmt.getClass(), jstmt);
+        logger.info("**Stmt: {}. {}", jstmt.getClass(), jstmt);
 
         if (jstmt instanceof DefinitionStmt) { // Abstract
             if (jstmt instanceof AssignStmt) { // Abstract
                 // We don't traverse each concrete assign types.
                 // They are all translated to stores.
+
                 LValue lvalue = ((AssignStmt<?, ?>) jstmt).getLValue();
                 RValue rvalue = ((AssignStmt<?, ?>) jstmt).getRValue();
+
+                if (lvalue.getType() instanceof NullType) {
+                    return codeGen.buildNop();
+                }
+
                 LLVMValueRef llvmPtr = tranLValue(lvalue);
-                LLVMValueRef llvmValue = tranRValue(rvalue);
+                LLVMTypeRef llvmPtrElTy = getElementType(getValueType(llvmPtr));
+
+                /*
+                 * T-STORE:
+                 *      Lval::T1
+                 *      RVal::T2
+                 *     T1 = (*T3)
+                 * -------------------
+                 *       T2 = T3
+                 */
+                LLVMValueRef llvmValue = tranRValue(rvalue, llvmPtrElTy);
+
+                LLVMTypeRef llvmValueType = getValueType(llvmValue);
+                as.assertTrue(llvmPtrElTy.equals(llvmValueType),
+                        "The pointer element type should == the value type.\n" +
+                                "LVal: [{}]\n" +
+                                "Ptr: [{}].\n" +
+                                "RVal: [{}]\n " +
+                                "Casted Val: [{}]",
+                        lvalue,
+                        getLLVMStr(llvmPtr),
+                        rvalue,
+                        getLLVMStr(llvmValueType));
+
                 LLVMValueRef store = codeGen.buildStore(llvmPtr, llvmValue);
                 return store;
             } else if (jstmt instanceof Invoke) {
@@ -346,37 +377,72 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return null;
     }
 
-    public LLVMValueRef tranRValue(RValue jexp) {
+    public LLVMValueRef tranRValue(RValue jexp, LLVMTypeRef... outTy) {
+        as.assertTrue(outTy.length <= 1, "Only one outType for typing, got {}", Arrays.stream(outTy).toList());
+        Optional<LLVMTypeRef> outType = Optional.ofNullable(null);
+        if (outTy.length == 1) {
+            outType = Optional.of(outTy[0]);
+        }
+
+        LLVMValueRef translatedVal = tranRValueImpl(jexp, outType);
+
+        // Enforce typing rule at top-level.
+        if (outType.isPresent()) {
+            return codeGen.buildTypeCast(translatedVal, outType.get());
+        } else {
+            return translatedVal;
+        }
+    }
+
+    public LLVMValueRef tranRValueImpl(RValue jexp, Optional<LLVMTypeRef> outType) {
+        /*
+         * We specify one outType for typing. It requires the translated value of jexp should have a type.
+         */
         if (jexp instanceof Literal) { // Interface
             if (jexp instanceof NumberLiteral) { // Interface
                 if (jexp instanceof IntegerLiteral) { // Interface
                     if (jexp instanceof IntLiteral) {
-                        Integer intNum = ((IntLiteral) jexp).getNumber();
-                        long intNumLong = intNum.longValue();
                         Type jIntType = jexp.getType();
                         LLVMTypeRef llvmIntType = tranType(jIntType);
+                        long intNumLong = ((IntLiteral) jexp).getNumber().longValue();
                         LLVMValueRef constInt = codeGen.buildConstInt(llvmIntType, intNumLong);
                         return constInt;
                     } else if (jexp instanceof LongLiteral) {
-                        // TODO:
+                        Type jlongType = jexp.getType();
+                        LLVMTypeRef llvmLongType = tranType(jlongType);
+                        long longNum = ((LongLiteral) jexp).getValue();
+                        LLVMValueRef constInt = codeGen.buildConstInt(llvmLongType, longNum);
+                        return constInt;
                     }
                 } else if (jexp instanceof FloatingPointLiteral) { // Interface
                     if (jexp instanceof FloatLiteral) {
-                        // TODO:
+                        Type jfloatType = jexp.getType();
+                        LLVMTypeRef llvmFloatType = tranType(jfloatType);
+                        double floatNumDouble = ((FloatLiteral) jexp).getNumber().doubleValue();
+                        LLVMValueRef constReal = codeGen.buildConstReal(llvmFloatType, floatNumDouble);
+                        return constReal;
                     } else if (jexp instanceof DoubleLiteral) {
-                        // TODO:
+                        Type jdoubleType = jexp.getType();
+                        LLVMTypeRef llvmDoubleType = tranType(jdoubleType);
+                        double doubleNum = ((DoubleLiteral) jexp).getValue();
+                        LLVMValueRef constReal = codeGen.buildConstReal(llvmDoubleType, doubleNum);
+                        return constReal;
                     }
                 }
             } else if (jexp instanceof ReferenceLiteral) { // Interface
-                if (jexp instanceof ClassLiteral) {
+                if (jexp instanceof NullLiteral) {
+                    Type jtype = jexp.getType();
+                    as.assertTrue(jtype instanceof NullType, "The type should be nulltype, so we don't know it.");
+                    as.assertTrue(outType.isPresent(), "We should specify a type for null literal");
+                    LLVMValueRef llvmNull = codeGen.buildNull(outType.get());
+                    return llvmNull;
+                } else if (jexp instanceof ClassLiteral) {
                     // TODO:
                 } else if (jexp instanceof StringLiteral) {
                     // TODO:
                 } else if (jexp instanceof MethodHandle) {
                     // TODO:
                 } else if (jexp instanceof MethodType) {
-                    // TODO:
-                } else if (jexp instanceof NullLiteral) {
                     // TODO:
                 }
             }
@@ -399,7 +465,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 FieldRef fieldRef = ((InstanceFieldAccess) jexp).getFieldRef();
                 JField jfield = fieldRef.resolveNullable();
                 if (jfield != null) {
-
+                    as.unimplemented();
                 } else {
                     as.unreachable("The static field access {} contains null field", jexp);
                 }
@@ -444,11 +510,17 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 }
             }
         } else if (jexp instanceof Var) {
-            Optional<LLVMValueRef> opvarPtr = maps.getVarMap((Var) jexp);
-            as.assertTrue(opvarPtr.isPresent(), "The variable {} has not been correctly handled", (Var) jexp);
-            LLVMValueRef ptr = opvarPtr.get();
-            LLVMValueRef llvmVal = codeGen.buildLoad(ptr, StringUtil.getVarNameAsLoad((Var) jexp));
-            return llvmVal;
+            if (jexp.getType() instanceof NullType) {
+                as.assertTrue(outType.isPresent(), "We need the outType to generate a 'typed' null value");
+                LLVMValueRef typedNullVal = codeGen.buildNull(outType.get());
+                return typedNullVal;
+            } else {
+                Optional<LLVMValueRef> opvarPtr = maps.getVarMap((Var) jexp);
+                as.assertTrue(opvarPtr.isPresent(), "The variable {} has not been correctly handled", (Var) jexp);
+                LLVMValueRef ptr = opvarPtr.get();
+                LLVMValueRef llvmVal = codeGen.buildLoad(ptr, StringUtil.getVarNameAsLoad((Var) jexp));
+                return llvmVal;
+            }
         } else if (jexp instanceof ArrayAccess) {
             // TODO:
         } else if (jexp instanceof CastExp) {
@@ -475,6 +547,9 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 as.unimplemented();
             }
         } else if (jexp instanceof Var) {
+            // We have this assertion because we don't want to return null.
+            as.assertFalse(jexp.getType() instanceof NullType, "It's not meaningful to have a null typed LValue: {}.", jexp);
+
             Optional<LLVMValueRef> opVarPtr = maps.getVarMap((Var) jexp);
             as.assertTrue(opVarPtr.isPresent(), "The variable {} has not been correctly handled", (Var) jexp);
             LLVMValueRef ptr = opVarPtr.get();

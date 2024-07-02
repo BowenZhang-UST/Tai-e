@@ -8,7 +8,10 @@ import prism.jellyfish.JellyFish;
 import prism.jellyfish.util.ArrayBuilder;
 import prism.jellyfish.util.AssertUtil;
 
-import java.lang.reflect.Array;
+
+import static prism.llvm.LLVMUtil.getValueType;
+import static prism.llvm.LLVMUtil.getLLVMStr;
+
 import java.util.List;
 
 
@@ -68,13 +71,6 @@ public class LLVMCodeGen {
         LLVM.LLVMPositionBuilderAtEnd(builder, block);
     }
 
-    public void addInst(LLVMBasicBlockRef block, LLVMValueRef inst) {
-        // Add instruction to the current inserting basic block
-        LLVMBasicBlockRef insertBlock = LLVM.LLVMGetInsertBlock(builder);
-        as.assertTrue(insertBlock == block, "The inserting block does not match the specified one.");
-        LLVM.LLVMInsertIntoBuilder(builder, inst);
-    }
-
     /*
      * Builders:
      * build a certain IR element
@@ -123,13 +119,27 @@ public class LLVMCodeGen {
     }
 
     /*
-     * Value Builders
+     * Literal Builders
      */
 
     public LLVMValueRef buildConstInt(LLVMTypeRef intType, long N) {
         LLVMValueRef constInt = LLVM.LLVMConstInt(intType, N, 1);
         return constInt;
     }
+
+    public LLVMValueRef buildConstReal(LLVMTypeRef realType, double N) {
+        LLVMValueRef constReal = LLVM.LLVMConstReal(realType, N);
+        return constReal;
+    }
+
+    public LLVMValueRef buildNull(LLVMTypeRef type) {
+        LLVMValueRef llvmNull = LLVM.LLVMConstNull(type);
+        return llvmNull;
+    }
+
+    /*
+     * Instruction Builders
+     */
 
     public LLVMValueRef buildAlloca(LLVMTypeRef type, String name) {
         LLVMValueRef alloca = LLVM.LLVMBuildAlloca(builder, type, name);
@@ -156,5 +166,48 @@ public class LLVMCodeGen {
         }
     }
 
+    public LLVMValueRef buildBitCast(LLVMValueRef val, LLVMTypeRef targetType) {
+        LLVMValueRef ret = LLVM.LLVMBuildBitCast(builder, val, targetType, "bitcast");
+        return ret;
+    }
+
+    public LLVMValueRef buildTypeCast(LLVMValueRef val, LLVMTypeRef targetType) {
+        LLVMTypeRef sourceType = getValueType(val);
+        if (sourceType.equals(targetType)) {
+            return val;
+        }
+        int srcKind = LLVM.LLVMGetTypeKind(sourceType);
+        int tgtKind = LLVM.LLVMGetTypeKind(targetType);
+
+        if (srcKind == LLVM.LLVMPointerTypeKind && tgtKind == LLVM.LLVMPointerTypeKind) {
+            LLVMValueRef cast = LLVM.LLVMBuildBitCast(builder, val, targetType, "ptr2ptr");
+            return cast;
+        } else if (srcKind == LLVM.LLVMIntegerTypeKind && tgtKind == LLVM.LLVMIntegerTypeKind) {
+            LLVMValueRef cast = LLVM.LLVMBuildIntCast(builder, val, targetType, "int2int");
+            return cast;
+        } else if ((srcKind == LLVM.LLVMFloatTypeKind || srcKind == LLVM.LLVMDoubleTypeKind) &&
+                (tgtKind == LLVM.LLVMFloatTypeKind || tgtKind == LLVM.LLVMDoubleTypeKind)) {
+            LLVMValueRef cast = LLVM.LLVMBuildFPCast(builder, val, targetType, "real2real");
+        } else if (srcKind == LLVM.LLVMIntegerTypeKind && (tgtKind == LLVM.LLVMFloatTypeKind || tgtKind == LLVM.LLVMDoubleTypeKind)) {
+            LLVMValueRef cast = LLVM.LLVMBuildSIToFP(builder, val, targetType, "int2real");
+            return cast;
+        } else if ((srcKind == LLVM.LLVMFloatTypeKind || srcKind == LLVM.LLVMDoubleTypeKind) && tgtKind == LLVM.LLVMIntegerTypeKind) {
+            LLVMValueRef cast = LLVM.LLVMBuildFPToSI(builder, val, targetType, "real2int");
+            return cast;
+        } else if (srcKind == LLVM.LLVMIntegerTypeKind && tgtKind == LLVM.LLVMPointerTypeKind) {
+            LLVMValueRef cast = LLVM.LLVMBuildIntToPtr(builder, val, targetType, "int2ptr");
+            return cast;
+        } else if (srcKind == LLVM.LLVMPointerTypeKind || tgtKind == LLVM.LLVMIntegerTypeKind) {
+            LLVMValueRef cast = LLVM.LLVMBuildPtrToInt(builder, val, targetType, "ptr2int");
+            return cast;
+        }
+        as.unreachable("Unexpected source type: {}, target type {}", getLLVMStr(sourceType), getLLVMStr(targetType));
+        return null;
+    }
+
+    public LLVMValueRef buildNop() {
+        // TODO: change it to call.
+        return LLVM.LLVMConstNull(LLVM.LLVMInt1Type());
+    }
 
 }
