@@ -19,6 +19,7 @@ import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.*;
 
+import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -322,6 +323,21 @@ public class JellyFish extends ProgramAnalysis<Void> {
                         return store;
                     }
                 }
+                // Ignore the other assign types for now
+            } else if (jstmt instanceof Invoke) {
+                // TODO:
+            }
+        } else if (jstmt instanceof JumpStmt) { // Abstract
+            if (jstmt instanceof SwitchStmt) { // Abstract
+                if (jstmt instanceof LookupSwitch) {
+                    // TODO:
+                } else if (jstmt instanceof TableSwitch) {
+                    // TODO:
+                }
+            } else if (jstmt instanceof Goto) {
+                // TODO
+            } else if (jstmt instanceof If) {
+                // TODO:
             }
         } else if (jstmt instanceof Return) {
             Var var = ((Return) jstmt).getValue();
@@ -333,6 +349,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMValueRef ret = codeGen.buildRet(retVal);
                 return ret;
             }
+        } else if (jstmt instanceof Nop) {
+            // TODO:
+        } else if (jstmt instanceof Monitor) {
+            // TODO:
         }
         as.unimplemented();
         return null;
@@ -340,13 +360,37 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     public LLVMValueRef tranRValue(RValue jexp) {
         if (jexp instanceof Literal) { // Interface
-            if (jexp instanceof IntLiteral) {
-                Integer intNum = ((IntLiteral) jexp).getNumber();
-                long intNumLong = intNum.longValue();
-                Type jIntType = jexp.getType();
-                LLVMTypeRef llvmIntType = tranType(jIntType);
-                LLVMValueRef constInt = codeGen.buildConstInt(llvmIntType, intNumLong);
-                return constInt;
+            if (jexp instanceof NumberLiteral) { // Interface
+                if (jexp instanceof IntegerLiteral) { // Interface
+                    if (jexp instanceof IntLiteral) {
+                        Integer intNum = ((IntLiteral) jexp).getNumber();
+                        long intNumLong = intNum.longValue();
+                        Type jIntType = jexp.getType();
+                        LLVMTypeRef llvmIntType = tranType(jIntType);
+                        LLVMValueRef constInt = codeGen.buildConstInt(llvmIntType, intNumLong);
+                        return constInt;
+                    } else if (jexp instanceof LongLiteral) {
+                        // TODO:
+                    }
+                } else if (jexp instanceof FloatingPointLiteral) { // Interface
+                    if (jexp instanceof FloatLiteral) {
+                        // TODO:
+                    } else if (jexp instanceof DoubleLiteral) {
+                        // TODO:
+                    }
+                }
+            } else if (jexp instanceof ReferenceLiteral) { // Interface
+                if (jexp instanceof ClassLiteral) {
+                    // TODO:
+                } else if (jexp instanceof StringLiteral) {
+                    // TODO:
+                } else if (jexp instanceof MethodHandle) {
+                    // TODO:
+                } else if (jexp instanceof MethodType) {
+                    // TODO:
+                } else if (jexp instanceof NullLiteral) {
+                    // TODO:
+                }
             }
         } else if (jexp instanceof FieldAccess) { // Abstract
             if (jexp instanceof StaticFieldAccess) {
@@ -361,7 +405,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 } else {
                     as.unreachable("The static field access {} contains null field", jexp);
                 }
-
             } else if (jexp instanceof InstanceFieldAccess) {
                 as.unimplemented();
                 Var baseVar = ((InstanceFieldAccess) jexp).getBase();
@@ -369,6 +412,47 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 JField jfield = fieldRef.resolveNullable();
                 if (jfield != null) {
 
+                } else {
+                    as.unreachable("The static field access {} contains null field", jexp);
+                }
+            }
+        } else if (jexp instanceof UnaryExp) { // Interface
+            if (jexp instanceof ArrayLengthExp) {
+                // TODO:
+            } else if (jexp instanceof NegExp) {
+                // TODO:
+            }
+        } else if (jexp instanceof BinaryExp) { // Interface
+            if (jexp instanceof ArithmeticExp) {
+                // TODO:
+            } else if (jexp instanceof BitwiseExp) {
+                // TODO:
+            } else if (jexp instanceof ComparisonExp) {
+                // TODO:
+            } else if (jexp instanceof ConditionExp) {
+                // TODO:
+            } else if (jexp instanceof ShiftExp) {
+                // TODO:
+            }
+        } else if (jexp instanceof NewExp) { // Interface
+            if (jexp instanceof NewArray) {
+                // TODO:
+            } else if (jexp instanceof NewInstance) {
+                // TODO:
+            } else if (jexp instanceof NewMultiArray) {
+                // TODO:
+            }
+        } else if (jexp instanceof InvokeExp) {
+            // TODO:
+            if (jexp instanceof InvokeStatic) {
+                // TODO:
+            } else if (jexp instanceof InvokeInstanceExp) { // Abstract
+                if (jexp instanceof InvokeDynamic) {
+                    // TODO:
+                } else if (jexp instanceof InvokeInterface) {
+                    // TODO:
+                } else if (jexp instanceof InvokeVirtual) {
+                    // TODO:
                 }
             }
         } else if (jexp instanceof Var) {
@@ -377,6 +461,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMValueRef ptr = opvarPtr.get();
             LLVMValueRef llvmVal = codeGen.buildLoad(ptr, StringUtil.getVarNameAsLoad((Var) jexp));
             return llvmVal;
+        } else if (jexp instanceof ArrayAccess) {
+            // TODO:
+        } else if (jexp instanceof CastExp) {
+            // TODO:
+        } else if (jexp instanceof InstanceOfExp) {
+            // TODO:
         }
         as.unimplemented();
         return null;
@@ -401,6 +491,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
             as.assertTrue(opVarPtr.isPresent(), "The variable {} has not been correctly handled", (Var) jexp);
             LLVMValueRef ptr = opVarPtr.get();
             return ptr;
+        } else if (jexp instanceof ArrayAccess) {
+            // TODO:
         }
         as.unimplemented();
         return null;
