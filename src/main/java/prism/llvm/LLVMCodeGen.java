@@ -1,12 +1,12 @@
 package prism.llvm;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.bytedeco.llvm.LLVM.*;
 import org.bytedeco.llvm.global.LLVM;
-import org.bytedeco.llvm.LLVM.LLVMContextRef;
-import org.bytedeco.llvm.LLVM.LLVMModuleRef;
-import org.bytedeco.llvm.LLVM.LLVMTypeRef;
-import org.bytedeco.llvm.LLVM.LLVMValueRef;
-import org.bytedeco.llvm.LLVM.LLVMBuilderRef;
+import prism.jellyfish.JellyFish;
 import prism.jellyfish.util.ArrayBuilder;
+import prism.jellyfish.util.AssertUtil;
 
 import java.lang.reflect.Array;
 import java.util.List;
@@ -21,6 +21,9 @@ public class LLVMCodeGen {
     LLVMContextRef context;
     LLVMModuleRef module;
     LLVMBuilderRef builder;
+
+    private static final Logger logger = LogManager.getLogger(LLVMCodeGen.class);
+    private static final AssertUtil as = new AssertUtil(logger);
 
     public LLVMCodeGen() {
         this.moduleName = "module";
@@ -47,13 +50,29 @@ public class LLVMCodeGen {
     //     module.
     // }
 
-    public LLVMValueRef addGlobalVariable(String name, LLVMTypeRef type) {
+    public LLVMValueRef addGlobalVariable(LLVMTypeRef type, String name) {
         return LLVM.LLVMAddGlobal(module, type, name);
     }
 
-    public LLVMValueRef addFunction(String funcName, LLVMTypeRef funcType) {
+    public LLVMValueRef addFunction(LLVMTypeRef funcType, String funcName) {
         LLVMValueRef func = LLVM.LLVMAddFunction(module, funcName, funcType);
         return func;
+    }
+
+    public LLVMBasicBlockRef addBasicBlock(LLVMValueRef func, String blockName) {
+        LLVMBasicBlockRef blockRef = LLVM.LLVMAppendBasicBlock(func, blockName);
+        return blockRef;
+    }
+
+    public void setInsertBlock(LLVMBasicBlockRef block) {
+        LLVM.LLVMPositionBuilderAtEnd(builder, block);
+    }
+
+    public void addInst(LLVMBasicBlockRef block, LLVMValueRef inst) {
+        // Add instruction to the current inserting basic block
+        LLVMBasicBlockRef insertBlock = LLVM.LLVMGetInsertBlock(builder);
+        as.assertTrue(insertBlock == block, "The inserting block does not match the specified one.");
+        LLVM.LLVMInsertIntoBuilder(builder, inst);
     }
 
     /*
@@ -106,9 +125,35 @@ public class LLVMCodeGen {
     /*
      * Value Builders
      */
-    public LLVMValueRef buildGlobalVar(LLVMTypeRef type, String name) {
-        LLVMValueRef global = LLVM.LLVMAddGlobal(module, type, name);
-        return global;
+
+    public LLVMValueRef buildConstInt(LLVMTypeRef intType, long N) {
+        LLVMValueRef constInt = LLVM.LLVMConstInt(intType, N, 1);
+        return constInt;
+    }
+
+    public LLVMValueRef buildAlloca(LLVMTypeRef type, String name) {
+        LLVMValueRef alloca = LLVM.LLVMBuildAlloca(builder, type, name);
+        return alloca;
+    }
+
+    public LLVMValueRef buildStore(LLVMValueRef ptr, LLVMValueRef value) {
+        LLVMValueRef store = LLVM.LLVMBuildStore(builder, value, ptr);
+        return store;
+    }
+
+    public LLVMValueRef buildLoad(LLVMValueRef ptr, String name) {
+        LLVMValueRef load = LLVM.LLVMBuildLoad(builder, ptr, name);
+        return load;
+    }
+
+    public LLVMValueRef buildRet(LLVMValueRef retVal) {
+        if (retVal == null) {
+            LLVMValueRef ret = LLVM.LLVMBuildRetVoid(builder);
+            return ret;
+        } else {
+            LLVMValueRef ret = LLVM.LLVMBuildRet(builder, retVal);
+            return ret;
+        }
     }
 
 

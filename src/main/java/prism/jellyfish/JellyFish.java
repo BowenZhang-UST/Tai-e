@@ -1,10 +1,13 @@
 package prism.jellyfish;
 
 
+import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
 import pascal.taie.World;
 import pascal.taie.analysis.ProgramAnalysis;
 import pascal.taie.ir.IR;
-import pascal.taie.ir.stmt.Stmt;
+import pascal.taie.ir.exp.*;
+import pascal.taie.ir.proginfo.FieldRef;
+import pascal.taie.ir.stmt.*;
 import pascal.taie.config.AnalysisConfig;
 
 import org.apache.logging.log4j.Logger;
@@ -16,7 +19,6 @@ import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.*;
 
-import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -30,8 +32,9 @@ import org.bytedeco.llvm.global.LLVM;
 
 import prism.jellyfish.util.AssertUtil;
 import prism.llvm.LLVMCodeGen;
-import prism.jellyfish.util.ArrayBuilder;
 import prism.jellyfish.util.StringUtil;
+
+import javax.swing.text.html.Option;
 
 public class JellyFish extends ProgramAnalysis<Void> {
     public static final String ID = "jelly-fish";
@@ -69,7 +72,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             // Methods
             Collection<JMethod> methods = jclass.getDeclaredMethods();
             for (JMethod jmethod : methods) {
-                LLVMValueRef llvmMethod = this.tranMethod(jclass, jmethod);
+                LLVMValueRef llvmMethod = this.tranMethod(jmethod);
 //                     String methodName = method.getName();
                 //     logger.info("    Method: {}", methodName);
                 //     IR ir = method.getIR();
@@ -80,10 +83,14 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         }
 
+
         // Pass 2
         for (JClass jclass : maps.getAllClasses()) {
             // Class fields: fill in the types.
             this.tranClassFields(jclass);
+        }
+        for (JMethod jmethod : maps.getAllMethods()) {
+            this.tranMethodBody(jmethod);
         }
 
         codeGen.generate();
@@ -110,13 +117,13 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     public LLVMTypeRef tranClass(JClass jclass) {
         String className = StringUtil.getClassName(jclass);
-        logger.info("Handle class: {}", className);
+//        logger.info("Handle class: {}", className);
 
         LLVMTypeRef classType = codeGen.buildNamedStruct(className);
 
         // A placeholder value to let the type stay in bitcode.
         String placeHolderValName = String.format("placeholder.%s", className);
-        LLVMValueRef phValue = codeGen.addGlobalVariable(placeHolderValName, classType);
+        LLVMValueRef phValue = codeGen.addGlobalVariable(classType, placeHolderValName);
         LLVM.LLVMSetLinkage(phValue, LLVM.LLVMWeakODRLinkage);
 
         // Update mapping
@@ -141,7 +148,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             superClasses.add(sclass);
             sclass = sclass.getSuperClass();
         }
-        logger.info("    Superclasses: {}", superClasses);
+//        logger.info("    Superclasses: {}", superClasses);
         for (JClass superClass : superClasses) {
             LLVMTypeRef llvmSClass = getOrTranClass(superClass);
         }
@@ -154,7 +161,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return classType;
     }
 
-    public LLVMTypeRef tranClassFields(JClass jclass) {
+    public void tranClassFields(JClass jclass) {
         Optional<LLVMTypeRef> opllvmClass = maps.getClassMap(jclass);
         as.assertTrue(opllvmClass.isPresent(), String.format("The class declaration of %s should have been translated.", jclass.getName()));
         LLVMTypeRef llvmClass = maps.getClassMap(jclass).get();
@@ -167,31 +174,15 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMTypeRef fllvmType = tranType(ftype);
             if (field.isStatic()) {
                 String staticFieldName = StringUtil.getStaticFieldName(jclass, field);
-                codeGen.buildGlobalVar(fllvmType, staticFieldName);
+                LLVMValueRef fieldVar = codeGen.addGlobalVariable(fllvmType, staticFieldName);
+                boolean ret = maps.setStaticFieldMap(field, fieldVar);
+                as.assertTrue(ret, String.format("The jfield %s has been duplicate translated.", field));
                 continue;
             }
             fieldTypes.add(fllvmType);
         }
         codeGen.setStructFields(llvmClass, fieldTypes);
-        return llvmClass;
-    }
-
-    public LLVMValueRef tranMethod(JClass jclass, JMethod jmethod) {
-        String methodName = StringUtil.getMethodName(jclass, jmethod);
-        List<LLVMTypeRef> paramTypes = new ArrayList<>();
-        if (!jmethod.isStatic()) {
-            LLVMTypeRef llvmClassType = getOrTranClass(jclass);
-            paramTypes.add(llvmClassType);
-        }
-        for (Type jType : jmethod.getParamTypes()) {
-            LLVMTypeRef type = tranType(jType);
-            paramTypes.add(type);
-        }
-        Type jRetType = jmethod.getReturnType();
-        LLVMTypeRef retType = tranType(jRetType);
-        LLVMTypeRef funcType = codeGen.buildFunctionType(retType, paramTypes);
-        LLVMValueRef func = codeGen.addFunction(methodName, funcType);
-        return func;
+        return;
     }
 
     public LLVMTypeRef tranType(Type jType) {
@@ -251,6 +242,165 @@ public class JellyFish extends ProgramAnalysis<Void> {
             as.unimplemented();
         }
         as.unreachable("All types should be considered except: " + jType);
+        return null;
+    }
+
+    public LLVMValueRef tranMethod(JMethod jmethod) {
+        JClass jclass = jmethod.getDeclaringClass();
+        String methodName = StringUtil.getMethodName(jclass, jmethod);
+        List<LLVMTypeRef> paramTypes = new ArrayList<>();
+        if (!jmethod.isStatic()) {
+            LLVMTypeRef llvmClassType = getOrTranClass(jclass);
+            paramTypes.add(llvmClassType);
+        }
+        for (Type jType : jmethod.getParamTypes()) {
+            LLVMTypeRef type = tranType(jType);
+            paramTypes.add(type);
+        }
+        Type jRetType = jmethod.getReturnType();
+        LLVMTypeRef retType = tranType(jRetType);
+        LLVMTypeRef funcType = codeGen.buildFunctionType(retType, paramTypes);
+        LLVMValueRef func = codeGen.addFunction(funcType, methodName);
+        boolean ret = maps.setMethodMap(jmethod, func);
+        as.assertTrue(ret, String.format("The method %s has been duplicate translated.", jmethod));
+
+        return func;
+    }
+
+    public void tranMethodBody(JMethod jmethod) {
+        if (!jmethod.getName().equals("<clinit>")) { // Debug use
+            return;
+        }
+        Optional<LLVMValueRef> opllvmFunc = maps.getMethodMap(jmethod);
+        as.assertTrue(opllvmFunc.isPresent(), String.format("The decl of jmethod $s should have be translated", jmethod));
+        LLVMValueRef llvmFunc = opllvmFunc.get();
+
+        // TODO: only one basic block.
+        LLVMBasicBlockRef block = codeGen.addBasicBlock(llvmFunc, "");
+        codeGen.setInsertBlock(block);
+
+        IR ir = jmethod.getIR();
+        List<Var> vars = ir.getVars();
+        for (Var var : vars) {
+            Type jvarType = var.getType();
+            LLVMTypeRef llvmVarType = tranType(jvarType);
+            String llvmVarName = StringUtil.getVarNameAsPtr(var);
+            LLVMValueRef alloca = codeGen.buildAlloca(llvmVarType, llvmVarName);
+            boolean ret = maps.setVarMap(var, alloca);
+            as.assertTrue(ret, String.format("The var %s has been duplicate translated.", var));
+        }
+
+        List<Stmt> jstmts = ir.getStmts();
+        for (Stmt jstmt : jstmts) {
+            LLVMValueRef llvmInst = this.tranStmt(jstmt);
+        }
+        maps.clearVarMap();
+
+    }
+
+    public LLVMValueRef tranStmt(Stmt jstmt) {
+        logger.info("Stmt: {}. {}", jstmt.getClass(), jstmt);
+
+        if (jstmt instanceof DefinitionStmt) { // Abstract
+            if (jstmt instanceof AssignStmt) { // Abstract
+                if (jstmt instanceof AssignLiteral) {
+                    Var var = ((AssignLiteral) jstmt).getLValue();
+                    Literal lit = ((AssignLiteral) jstmt).getRValue();
+                    LLVMValueRef ptr = tranLValue(var);
+                    LLVMValueRef litVal = tranRValue(lit);
+                    LLVMValueRef store = codeGen.buildStore(ptr, litVal);
+                    return store;
+                } else if (jstmt instanceof FieldStmt) { // Abstract
+                    if (jstmt instanceof StoreField) {
+                        Var var = ((StoreField) jstmt).getRValue();
+                        LLVMValueRef varVal = tranRValue(var);
+
+                        FieldAccess fieldAccess = ((StoreField) jstmt).getLValue();
+                        LLVMValueRef ptr = tranLValue(fieldAccess);
+
+                        LLVMValueRef store = codeGen.buildStore(ptr, varVal);
+                        return store;
+                    }
+                }
+            }
+        } else if (jstmt instanceof Return) {
+            Var var = ((Return) jstmt).getValue();
+            if (var == null) {
+                LLVMValueRef ret = codeGen.buildRet(null);
+                return ret;
+            } else {
+                LLVMValueRef retVal = tranRValue(var);
+                LLVMValueRef ret = codeGen.buildRet(retVal);
+                return ret;
+            }
+        }
+        as.unimplemented();
+        return null;
+    }
+
+    public LLVMValueRef tranRValue(RValue jexp) {
+        if (jexp instanceof Literal) { // Interface
+            if (jexp instanceof IntLiteral) {
+                Integer intNum = ((IntLiteral) jexp).getNumber();
+                long intNumLong = intNum.longValue();
+                Type jIntType = jexp.getType();
+                LLVMTypeRef llvmIntType = tranType(jIntType);
+                LLVMValueRef constInt = codeGen.buildConstInt(llvmIntType, intNumLong);
+                return constInt;
+            }
+        } else if (jexp instanceof FieldAccess) { // Abstract
+            if (jexp instanceof StaticFieldAccess) {
+                FieldRef fieldRef = ((StaticFieldAccess) jexp).getFieldRef();
+                JField jfield = fieldRef.resolveNullable();
+                if (jfield != null) {
+                    Optional<LLVMValueRef> opfieldPtr = maps.getStaticFieldMap(jfield);
+                    as.assertTrue(opfieldPtr.isPresent(), String.format("The field %s should have been translated.", jfield));
+                    LLVMValueRef ptr = opfieldPtr.get();
+                    LLVMValueRef load = codeGen.buildLoad(ptr, jfield.getName());
+                    return load;
+                }
+
+            } else if (jexp instanceof InstanceFieldAccess) {
+                as.unimplemented();
+                Var baseVar = ((InstanceFieldAccess) jexp).getBase();
+                FieldRef fieldRef = ((InstanceFieldAccess) jexp).getFieldRef();
+                JField jfield = fieldRef.resolveNullable();
+                if (jfield != null) {
+
+                }
+            }
+        } else if (jexp instanceof Var) {
+            Optional<LLVMValueRef> opvarPtr = maps.getVarMap((Var) jexp);
+            as.assertTrue(opvarPtr.isPresent(), String.format("The variable %s has not been correctly handled", (Var) jexp));
+            LLVMValueRef ptr = opvarPtr.get();
+            LLVMValueRef llvmVal = codeGen.buildLoad(ptr, StringUtil.getVarNameAsLoad((Var) jexp));
+            return llvmVal;
+        }
+        as.unimplemented();
+        return null;
+    }
+
+    public LLVMValueRef tranLValue(LValue jexp) {
+        if (jexp instanceof FieldAccess) { // Abstract
+            if (jexp instanceof StaticFieldAccess) {
+                FieldRef fieldRef = ((StaticFieldAccess) jexp).getFieldRef();
+                JField jfield = fieldRef.resolveNullable();
+                if (jfield != null) {
+                    Optional<LLVMValueRef> opfieldPtr = maps.getStaticFieldMap(jfield);
+                    as.assertTrue(opfieldPtr.isPresent(), String.format("The field %s should have been translated.", jfield));
+                    LLVMValueRef ptr = opfieldPtr.get();
+                    return ptr;
+                }
+            } else if (jexp instanceof InstanceFieldAccess) {
+                as.unimplemented();
+            }
+        } else if (jexp instanceof Var) {
+            Optional<LLVMValueRef> opVarPtr = maps.getVarMap((Var) jexp);
+            as.assertTrue(opVarPtr.isPresent(), String.format("The variable %s has not been correctly handled", (Var) jexp));
+            LLVMValueRef ptr = opVarPtr.get();
+            return ptr;
+        }
+        as.unimplemented();
         return null;
     }
 

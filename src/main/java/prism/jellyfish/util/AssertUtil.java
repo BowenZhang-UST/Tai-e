@@ -16,20 +16,20 @@ public class AssertUtil {
 
     public void assertTrue(boolean condition, String errMsg) {
         if (!condition) {
-            logger.error("Assertion fail: ", errMsg);
+            logger.error("Assertion fail: {}", errMsg);
             exit();
         }
     }
 
     public void assertFalse(boolean condition, String errMsg) {
         if (condition) {
-            logger.error("Assertion fail: ", errMsg);
+            logger.error("Assertion fail: {}", errMsg);
             exit();
         }
     }
 
     public void unreachable(String errMsg) {
-        logger.error("Unreachable: ", errMsg);
+        logger.error("Unreachable: {}", errMsg);
         exit();
     }
 
