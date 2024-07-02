@@ -128,7 +128,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
         // Update mapping
         boolean ret = maps.setClassMap(jclass, classType);
-        as.assertTrue(ret, String.format("The jclass %s has been duplicate translated.", className));
+        as.assertTrue(ret, "The jclass {} has been duplicate translated.", jclass);
 
         // After update: also translate the "relevant classes" by different types of reference
         // 1. Field reference
@@ -163,7 +163,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     public void tranClassFields(JClass jclass) {
         Optional<LLVMTypeRef> opllvmClass = maps.getClassMap(jclass);
-        as.assertTrue(opllvmClass.isPresent(), String.format("The class declaration of %s should have been translated.", jclass.getName()));
+        as.assertTrue(opllvmClass.isPresent(), "The class declaration of {} should have been translated.", jclass);
         LLVMTypeRef llvmClass = maps.getClassMap(jclass).get();
         Collection<JField> fields = jclass.getDeclaredFields();
 
@@ -176,7 +176,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 String staticFieldName = StringUtil.getStaticFieldName(jclass, field);
                 LLVMValueRef fieldVar = codeGen.addGlobalVariable(fllvmType, staticFieldName);
                 boolean ret = maps.setStaticFieldMap(field, fieldVar);
-                as.assertTrue(ret, String.format("The jfield %s has been duplicate translated.", field));
+                as.assertTrue(ret, "The jfield {} has been duplicate translated.", field);
                 continue;
             }
             fieldTypes.add(fllvmType);
@@ -241,7 +241,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         } else if (jType instanceof BottomType) {
             as.unimplemented();
         }
-        as.unreachable("All types should be considered except: " + jType);
+        as.unreachable("All types should be considered except: {}", jType);
         return null;
     }
 
@@ -262,7 +262,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMTypeRef funcType = codeGen.buildFunctionType(retType, paramTypes);
         LLVMValueRef func = codeGen.addFunction(funcType, methodName);
         boolean ret = maps.setMethodMap(jmethod, func);
-        as.assertTrue(ret, String.format("The method %s has been duplicate translated.", jmethod));
+        as.assertTrue(ret, "The method {} has been duplicate translated.", jmethod);
 
         return func;
     }
@@ -272,7 +272,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             return;
         }
         Optional<LLVMValueRef> opllvmFunc = maps.getMethodMap(jmethod);
-        as.assertTrue(opllvmFunc.isPresent(), String.format("The decl of jmethod $s should have be translated", jmethod));
+        as.assertTrue(opllvmFunc.isPresent(), "The decl of jmethod {} should have be translated", jmethod);
         LLVMValueRef llvmFunc = opllvmFunc.get();
 
         // TODO: only one basic block.
@@ -287,7 +287,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             String llvmVarName = StringUtil.getVarNameAsPtr(var);
             LLVMValueRef alloca = codeGen.buildAlloca(llvmVarType, llvmVarName);
             boolean ret = maps.setVarMap(var, alloca);
-            as.assertTrue(ret, String.format("The var %s has been duplicate translated.", var));
+            as.assertTrue(ret, "The var {} has been duplicate translated.", var);
         }
 
         List<Stmt> jstmts = ir.getStmts();
@@ -354,10 +354,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 JField jfield = fieldRef.resolveNullable();
                 if (jfield != null) {
                     Optional<LLVMValueRef> opfieldPtr = maps.getStaticFieldMap(jfield);
-                    as.assertTrue(opfieldPtr.isPresent(), String.format("The field %s should have been translated.", jfield));
+                    as.assertTrue(opfieldPtr.isPresent(), "The field {} should have been translated.", jfield);
                     LLVMValueRef ptr = opfieldPtr.get();
                     LLVMValueRef load = codeGen.buildLoad(ptr, jfield.getName());
                     return load;
+                } else {
+                    as.unreachable("The static field access {} contains null field", jexp);
                 }
 
             } else if (jexp instanceof InstanceFieldAccess) {
@@ -371,7 +373,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         } else if (jexp instanceof Var) {
             Optional<LLVMValueRef> opvarPtr = maps.getVarMap((Var) jexp);
-            as.assertTrue(opvarPtr.isPresent(), String.format("The variable %s has not been correctly handled", (Var) jexp));
+            as.assertTrue(opvarPtr.isPresent(), "The variable {} has not been correctly handled", (Var) jexp);
             LLVMValueRef ptr = opvarPtr.get();
             LLVMValueRef llvmVal = codeGen.buildLoad(ptr, StringUtil.getVarNameAsLoad((Var) jexp));
             return llvmVal;
@@ -387,7 +389,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 JField jfield = fieldRef.resolveNullable();
                 if (jfield != null) {
                     Optional<LLVMValueRef> opfieldPtr = maps.getStaticFieldMap(jfield);
-                    as.assertTrue(opfieldPtr.isPresent(), String.format("The field %s should have been translated.", jfield));
+                    as.assertTrue(opfieldPtr.isPresent(), "The field {} should have been translated.", jfield);
                     LLVMValueRef ptr = opfieldPtr.get();
                     return ptr;
                 }
@@ -396,7 +398,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         } else if (jexp instanceof Var) {
             Optional<LLVMValueRef> opVarPtr = maps.getVarMap((Var) jexp);
-            as.assertTrue(opVarPtr.isPresent(), String.format("The variable %s has not been correctly handled", (Var) jexp));
+            as.assertTrue(opVarPtr.isPresent(), "The variable {} has not been correctly handled", (Var) jexp);
             LLVMValueRef ptr = opVarPtr.get();
             return ptr;
         }

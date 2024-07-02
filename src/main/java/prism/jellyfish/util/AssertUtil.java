@@ -2,6 +2,9 @@ package prism.jellyfish.util;
 
 import org.apache.logging.log4j.Logger;
 
+import java.text.MessageFormat;
+import java.util.regex.Pattern;
+
 public class AssertUtil {
     Logger logger;
 
@@ -14,22 +17,35 @@ public class AssertUtil {
         System.exit(-1);
     }
 
-    public void assertTrue(boolean condition, String errMsg) {
+    private String myFormat(String s, Object ... params) {
+        // Input: "Format: {} {}"
+        // Output: "Format: {0} {1}"
+        int i = 0;
+        while (s.contains("{}")) {
+            s= s.replaceFirst(Pattern.quote("{}"), "{" + i++ + "}");
+        }
+        return MessageFormat.format(s, params);
+    }
+
+    public void assertTrue(boolean condition, String errMsg, Object... strParams) {
         if (!condition) {
-            logger.error("Assertion fail: {}", errMsg);
+            String userStr = myFormat(errMsg, strParams);
+            logger.error("Assertion fail: {}", userStr);
             exit();
         }
     }
 
-    public void assertFalse(boolean condition, String errMsg) {
+    public void assertFalse(boolean condition, String errMsg, Object... strParams) {
         if (condition) {
-            logger.error("Assertion fail: {}", errMsg);
+            String userStr = myFormat(errMsg, strParams);
+            logger.error("Assertion fail: {}", userStr);
             exit();
         }
     }
 
-    public void unreachable(String errMsg) {
-        logger.error("Unreachable: {}", errMsg);
+    public void unreachable(String errMsg, Object... strParams) {
+        String userStr = myFormat(errMsg, strParams);
+        logger.error("Unreachable: {}", userStr);
         exit();
     }
 
