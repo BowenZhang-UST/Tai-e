@@ -30,7 +30,7 @@ is the complete Tai-e with JellyFish.
 ./gradlew fatJar
 ```
 
-### 3.Translate test cases
+### 2.Translate test cases
 
 Compile the test cases using the JDK-17
 
