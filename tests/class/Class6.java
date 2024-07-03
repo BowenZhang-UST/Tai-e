@@ -7,9 +7,6 @@ public class Class6 {
     static char f5;
     static float f6;
     static double f7;
-    static int[] f8;
-    static int[][] f9;
-    static Object f10;
 
     static {
         f1 = 11;
@@ -19,11 +16,9 @@ public class Class6 {
         f5 = 'A';
         f6 = 15.0f;
         f7 = 16.0;
-//        f8 = {1, 2, 3, 4};
-//        f9 = {{1,2}, {3, 4}};
-        f10 = null;
     }
 
-    public static void main(String[] args) {}
+    public static void main(String[] args) {
+    }
 
 }

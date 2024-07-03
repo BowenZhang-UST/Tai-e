@@ -8,10 +8,12 @@ class Class4B {
 }
 
 public class Class4 {
-    int f1=1;
+    int f1 = 1;
     float f2;
     String f3;
     Class4A f4;
     Class4B f5;
-    public static void main(String[] args) {}
+
+    public static void main(String[] args) {
+    }
 }

@@ -166,9 +166,85 @@ public class LLVMCodeGen {
         }
     }
 
+    public LLVMValueRef buildBinaryOp(String op, LLVMValueRef left, LLVMValueRef right, LLVMTypeRef resType) {
+        // Typing:
+        LLVMTypeRef lType = getValueType(left);
+        LLVMTypeRef rType = getValueType(right);
+        as.assertTrue(lType.equals(resType),
+                "Typing: The left type of value {} doesn't match result type {}",
+                getLLVMStr(left),
+                getLLVMStr(resType));
+        as.assertTrue(rType.equals(resType),
+                "Typing: right left type of value {} doesn't match result type {}",
+                getLLVMStr(right),
+                getLLVMStr(resType));
+
+        int resKind = LLVM.LLVMGetTypeKind(resType);
+
+        if (op.equals("+")) {
+            if (resKind == LLVM.LLVMIntegerTypeKind) {
+                LLVMValueRef add = LLVM.LLVMBuildAdd(builder, left, right, "add");
+                return add;
+            } else if (resKind == LLVM.LLVMFloatTypeKind || resKind == LLVM.LLVMDoubleTypeKind) {
+                LLVMValueRef fadd = LLVM.LLVMBuildFAdd(builder, left, right, "fadd");
+                return fadd;
+            } else {
+                as.unreachable("Typing: cannot create ADD operation for type {}", getLLVMStr(resType));
+                return null;
+            }
+        } else if (op.equals("-")) {
+            if (resKind == LLVM.LLVMIntegerTypeKind) {
+                LLVMValueRef sub = LLVM.LLVMBuildSub(builder, left, right, "sub");
+                return sub;
+            } else if (resKind == LLVM.LLVMFloatTypeKind || resKind == LLVM.LLVMDoubleTypeKind) {
+                LLVMValueRef fsub = LLVM.LLVMBuildFSub(builder, left, right, "fsub");
+                return fsub;
+            } else {
+                as.unreachable("Typing: cannot create SUB operation for type {}", getLLVMStr(resType));
+                return null;
+            }
+        } else if (op.equals("*")) {
+            if (resKind == LLVM.LLVMIntegerTypeKind) {
+                LLVMValueRef mul = LLVM.LLVMBuildMul(builder, left, right, "mul");
+                return mul;
+            } else if (resKind == LLVM.LLVMFloatTypeKind || resKind == LLVM.LLVMDoubleTypeKind) {
+                LLVMValueRef fmul = LLVM.LLVMBuildFMul(builder, left, right, "fmul");
+                return fmul;
+            } else {
+                as.unreachable("Typing: cannot create MUL operation for type {}", getLLVMStr(resType));
+                return null;
+            }
+        } else if (op.equals("/")) {
+            if (resKind == LLVM.LLVMIntegerTypeKind) {
+                LLVMValueRef sdiv = LLVM.LLVMBuildSDiv(builder, left, right, "sdiv");
+                return sdiv;
+            } else if (resKind == LLVM.LLVMFloatTypeKind || resKind == LLVM.LLVMDoubleTypeKind) {
+                LLVMValueRef fdiv = LLVM.LLVMBuildFDiv(builder, left, right, "fdiv");
+                return fdiv;
+            } else {
+                as.unreachable("Typing: cannot create DIV operation for type {}", getLLVMStr(resType));
+                return null;
+            }
+        } else if (op.equals("%")) {
+            if (resKind == LLVM.LLVMIntegerTypeKind) {
+                LLVMValueRef srem = LLVM.LLVMBuildSRem(builder, left, right, "srem");
+                return srem;
+            } else if (resKind == LLVM.LLVMFloatTypeKind || resKind == LLVM.LLVMDoubleTypeKind) {
+                LLVMValueRef frem = LLVM.LLVMBuildFRem(builder, left, right, "frem");
+                return frem;
+            } else {
+                as.unreachable("Typing: cannot create REM operation for type {}", getLLVMStr(resType));
+                return null;
+            }
+        } else {
+            as.unreachable("Unexpected op {}", op);
+            return null;
+        }
+    }
+
     public LLVMValueRef buildBitCast(LLVMValueRef val, LLVMTypeRef targetType) {
-        LLVMValueRef ret = LLVM.LLVMBuildBitCast(builder, val, targetType, "bitcast");
-        return ret;
+        LLVMValueRef cast = LLVM.LLVMBuildBitCast(builder, val, targetType, "bitcast");
+        return cast;
     }
 
     public LLVMValueRef buildTypeCast(LLVMValueRef val, LLVMTypeRef targetType) {

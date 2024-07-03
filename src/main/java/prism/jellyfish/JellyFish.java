@@ -19,7 +19,7 @@ import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.*;
 
-import java.lang.invoke.MethodHandles;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -31,7 +31,7 @@ import org.bytedeco.llvm.global.LLVM;
 import prism.jellyfish.util.AssertUtil;
 import prism.llvm.LLVMCodeGen;
 import prism.jellyfish.util.StringUtil;
-import prism.llvm.LLVMUtil;
+
 
 import static prism.llvm.LLVMUtil.getElementType;
 import static prism.llvm.LLVMUtil.getValueType;
@@ -331,7 +331,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
                 LLVMTypeRef llvmValueType = getValueType(llvmValue);
                 as.assertTrue(llvmPtrElTy.equals(llvmValueType),
-                        "The pointer element type should == the value type.\n" +
+                        "Typing: The pointer element type should == the value type.\n" +
                                 "LVal: [{}]\n" +
                                 "Ptr: [{}].\n" +
                                 "RVal: [{}]\n " +
@@ -369,7 +369,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 return ret;
             }
         } else if (jstmt instanceof Nop) {
-            // TODO:
+            LLVMValueRef nop = codeGen.buildNop();
+            return nop;
         } else if (jstmt instanceof Monitor) {
             // TODO:
         }
@@ -479,6 +480,34 @@ public class JellyFish extends ProgramAnalysis<Void> {
         } else if (jexp instanceof BinaryExp) { // Interface
             if (jexp instanceof ArithmeticExp) {
                 // TODO:
+                Type jresType = jexp.getType();
+                LLVMTypeRef resType = tranType(jresType);
+
+                Var left = ((ArithmeticExp) jexp).getOperand1();
+                Var right = ((ArithmeticExp) jexp).getOperand2();
+                ArithmeticExp.Op op = ((ArithmeticExp) jexp).getOperator();
+
+                String opStr = "";
+                if (op.equals(ArithmeticExp.Op.ADD)) {
+                    opStr = "+";
+                } else if (op.equals(ArithmeticExp.Op.SUB)) {
+                    opStr = "-";
+                } else if (op.equals(ArithmeticExp.Op.MUL)) {
+                    opStr = "*";
+                } else if (op.equals(ArithmeticExp.Op.DIV)) {
+                    opStr = "/";
+                } else if (op.equals(ArithmeticExp.Op.REM)) {
+                    opStr = "%";
+                } else {
+                    as.unreachable("Unexpected Op {}", op);
+                }
+
+                LLVMValueRef leftVal = tranRValue(left, resType);
+                LLVMValueRef rightVal = tranRValue(right, resType);
+
+                LLVMValueRef binOp = codeGen.buildBinaryOp(opStr, leftVal, rightVal, resType);
+                return binOp;
+
             } else if (jexp instanceof BitwiseExp) {
                 // TODO:
             } else if (jexp instanceof ComparisonExp) {
