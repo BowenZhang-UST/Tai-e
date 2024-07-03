@@ -17,33 +17,36 @@ export PATH="$JAVA_HOME/path/to/bin:$PATH"
 
 ### 1. Build JellyFish as a component of Tai-e
 
-For development use. (It would be much quicker).
+- Development build (much quicker).
 
-```
-./gradlew compileJava
-```
+    ```
+    ./gradlew compileJava
+    ```
 
-For production use (It takes minutes). It generates a jar application in `build` dir. The jar file
-is the complete Tai-e with JellyFish.
+- Production build (takes minutes). It generates an all-in-one jar application in `build` dir. It is the complete Tai-e jar file.
 
-```shell
-./gradlew fatJar
-```
+    ```shell
+    ./gradlew fatJar
+    ```
 
 ### 2.Translate test cases
 
-Compile the test cases using the JDK-17
+Compile the test cases.
 
 ```shell
 javac tests/class/*.java
 ```
 
-Run JellyFish as a pass in Tai-e with `JAVA_HOME` set to JDK-17.
+Run JellyFish as a pass in Tai-e.
 
-```shell
-./gradlew run --args="-a jelly-fish -cp tests/class -m Class1"
-```
-
+- For development build:
+    ```shell
+    ./gradlew run --args="-a jelly-fish -cp tests/class -m Class1"
+    ```
+- For production build:
+    ```shell
+    java -jar build/[tai-e far file] -a jelly-fish -cp tests/class -m Class1
+    ```
 The last command line would generate an LLVM 12 bitcode `out.bc` at current dir. You can
 use `llvm-dis` to get the readable ir file.
 
