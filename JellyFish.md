@@ -44,7 +44,8 @@ Run JellyFish as a pass in Tai-e with `JAVA_HOME` set to JDK-17.
 ./gradlew run --args="-a jelly-fish -cp tests/class -m Class1"
 ```
 
-This command line would generate an LLVM 12 bitcode `out.bc` at current dir.
+The last command line would generate an LLVM 12 bitcode `out.bc` at current dir. You can
+use `llvm-dis` to get the readable ir file.
 
 ```shell
 llvm-dis out.bc
