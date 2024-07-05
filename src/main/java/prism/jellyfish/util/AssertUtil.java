@@ -17,12 +17,12 @@ public class AssertUtil {
         System.exit(-1);
     }
 
-    private String myFormat(String s, Object ... params) {
+    private String myFormat(String s, Object... params) {
         // Input: "Format: {} {}"
         // Output: "Format: {0} {1}"
         int i = 0;
         while (s.contains("{}")) {
-            s= s.replaceFirst(Pattern.quote("{}"), "{" + i++ + "}");
+            s = s.replaceFirst(Pattern.quote("{}"), "{" + i++ + "}");
         }
         return MessageFormat.format(s, params);
     }

@@ -28,10 +28,13 @@ import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
 import org.bytedeco.llvm.global.LLVM;
 
+import pascal.taie.util.collection.Pair;
 import prism.jellyfish.util.AssertUtil;
 import prism.llvm.LLVMCodeGen;
 import prism.jellyfish.util.StringUtil;
 
+
+import javax.annotation.Nullable;
 
 import static prism.llvm.LLVMUtil.getElementType;
 import static prism.llvm.LLVMUtil.getValueType;
@@ -259,8 +262,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMTypeRef type = tranType(jType);
             paramTypes.add(type);
         }
-        Type jRetType = jmethod.getReturnType();
-        LLVMTypeRef retType = tranType(jRetType);
+        Type jretType = jmethod.getReturnType();
+        LLVMTypeRef retType = tranType(jretType);
         LLVMTypeRef funcType = codeGen.buildFunctionType(retType, paramTypes);
         LLVMValueRef func = codeGen.addFunction(funcType, methodName);
         boolean ret = maps.setMethodMap(jmethod, func);
@@ -295,13 +298,13 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
         List<Stmt> jstmts = ir.getStmts();
         for (Stmt jstmt : jstmts) {
-            LLVMValueRef llvmInst = this.tranStmt(jstmt);
+            LLVMValueRef llvmInst = this.tranStmt(jstmt, jmethod);
         }
         maps.clearVarMap();
 
     }
 
-    public LLVMValueRef tranStmt(Stmt jstmt) {
+    public LLVMValueRef tranStmt(Stmt jstmt, JMethod jmethod) {
         logger.info("**Stmt: {}. {}", jstmt.getClass(), jstmt);
 
         if (jstmt instanceof DefinitionStmt) { // Abstract
@@ -364,7 +367,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMValueRef ret = codeGen.buildRet(null);
                 return ret;
             } else {
-                LLVMValueRef retVal = tranRValue(var);
+                Type jretType = jmethod.getReturnType();
+                LLVMTypeRef retType = tranType(jretType);
+                as.assertTrue(LLVM.LLVMGetTypeKind(retType) != LLVM.LLVMVoidTypeKind, "The none-void return stmt {} should not return void.", jstmt);
+                LLVMValueRef retVal = tranRValue(var, retType);
                 LLVMValueRef ret = codeGen.buildRet(retVal);
                 return ret;
             }
@@ -378,24 +384,29 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return null;
     }
 
-    public LLVMValueRef tranRValue(RValue jexp, LLVMTypeRef... outTy) {
-        as.assertTrue(outTy.length <= 1, "Only one outType for typing, got {}", Arrays.stream(outTy).toList());
-        Optional<LLVMTypeRef> outType = Optional.ofNullable(null);
-        if (outTy.length == 1) {
-            outType = Optional.of(outTy[0]);
-        }
+    public LLVMValueRef tranRValue(RValue jexp, LLVMTypeRef outType) {
+        /* Translate RValue with a specified out Type.
+         * So that the resulting LLVM value must be typed as this type.
+         */
+        as.assertTrue(outType != null, "Need to specify an out type to get a LLVM value with this type.");
 
-        LLVMValueRef translatedVal = tranRValueImpl(jexp, outType);
+        LLVMValueRef translatedVal = tranRValueImpl(jexp, Optional.of(outType));  // pass in as default type
+        as.assertTrue(translatedVal != null, "We can't obtain a null value when using a default out type.");
 
-        // Enforce typing rule at top-level.
-        if (outType.isPresent()) {
-            return codeGen.buildTypeCast(translatedVal, outType.get());
-        } else {
-            return translatedVal;
-        }
+        return codeGen.buildTypeCast(translatedVal, outType);  // convert if needed.
     }
 
-    public LLVMValueRef tranRValueImpl(RValue jexp, Optional<LLVMTypeRef> outType) {
+    public Optional<LLVMValueRef> tranRValue(RValue jexp) {
+        /* Translate RValue without a specified out Type.
+         * So that we don't have a type assumption of the resulting LLVM value.
+         * It returns null if the result is an "untyped null"
+         */
+        LLVMValueRef translateVal = tranRValueImpl(jexp, Optional.ofNullable(null));
+        return Optional.ofNullable(translateVal);
+    }
+
+    @Nullable
+    public LLVMValueRef tranRValueImpl(RValue jexp, Optional<LLVMTypeRef> defaultType) {
         /*
          * We specify one outType for typing. It requires the translated value of jexp should have a type.
          */
@@ -434,9 +445,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 if (jexp instanceof NullLiteral) {
                     Type jtype = jexp.getType();
                     as.assertTrue(jtype instanceof NullType, "The type should be nulltype, so we don't know it.");
-                    as.assertTrue(outType.isPresent(), "We should specify a type for null literal");
-                    LLVMValueRef llvmNull = codeGen.buildNull(outType.get());
-                    return llvmNull;
+                    if (defaultType.isPresent()) {
+                        LLVMValueRef llvmNull = codeGen.buildNull(defaultType.get());
+                        return llvmNull;
+                    } else {
+                        return null;
+                    }
                 } else if (jexp instanceof ClassLiteral) {
                     // TODO:
                 } else if (jexp instanceof StringLiteral) {
@@ -478,13 +492,23 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 // TODO:
             }
         } else if (jexp instanceof BinaryExp) { // Interface
-            if (jexp instanceof ArithmeticExp) {
-                // TODO:
-                Type jresType = jexp.getType();
-                LLVMTypeRef resType = tranType(jresType);
+            Type jresType = jexp.getType();
+            LLVMTypeRef resType = tranType(jresType);
 
-                Var left = ((ArithmeticExp) jexp).getOperand1();
-                Var right = ((ArithmeticExp) jexp).getOperand2();
+            Var left = ((BinaryExp) jexp).getOperand1();
+            Var right = ((BinaryExp) jexp).getOperand2();
+
+            if (jexp instanceof ArithmeticExp) {
+                /*
+                 * T-Arithmetic:
+                 *     A = B op C
+                 *  A::T  B::T1  C::T2
+                 * -------------------
+                 *     T = T1 = T2
+                 */
+                LLVMValueRef leftVal = tranRValue(left, resType);
+                LLVMValueRef rightVal = tranRValue(right, resType);
+
                 ArithmeticExp.Op op = ((ArithmeticExp) jexp).getOperator();
 
                 String opStr = "";
@@ -502,20 +526,137 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     as.unreachable("Unexpected Op {}", op);
                 }
 
-                LLVMValueRef leftVal = tranRValue(left, resType);
-                LLVMValueRef rightVal = tranRValue(right, resType);
-
                 LLVMValueRef binOp = codeGen.buildBinaryOp(opStr, leftVal, rightVal, resType);
                 return binOp;
 
             } else if (jexp instanceof BitwiseExp) {
-                // TODO:
+                /*
+                 * T-Bitwise:
+                 *     A = B op C
+                 *  A::T  B::T1  C::T2
+                 * -------------------
+                 *     T = T1 = T2
+                 */
+                LLVMValueRef leftVal = tranRValue(left, resType);
+                LLVMValueRef rightVal = tranRValue(right, resType);
+
+                BitwiseExp.Op op = ((BitwiseExp) jexp).getOperator();
+
+                String opStr = "";
+                if (op.equals(BitwiseExp.Op.AND)) {
+                    opStr = "&";
+                } else if (op.equals(BitwiseExp.Op.OR)) {
+                    opStr = "|";
+                } else if (op.equals(BitwiseExp.Op.XOR)) {
+                    opStr = "^";
+                } else {
+                    as.unreachable("Unexpected Op {}", op);
+                }
+
+                LLVMValueRef binOp = codeGen.buildBinaryOp(opStr, leftVal, rightVal, resType);
+                return binOp;
+
             } else if (jexp instanceof ComparisonExp) {
-                // TODO:
+                /*
+                 * T-Comparison:
+                 *     A = B op C
+                 *  A::T  B::T1  C::T2
+                 * -------------------
+                 *     T1 = T2
+                 *     T = int
+                 */
+                Optional<LLVMValueRef> opleftVal = tranRValue(left);
+                Optional<LLVMValueRef> oprightVal = tranRValue(right);
+                LLVMTypeRef comparisonDefaultType = codeGen.buildIntType(32); // int
+                Pair<LLVMValueRef, LLVMValueRef> unifiedOperands = codeGen.unifyValues(opleftVal, oprightVal, comparisonDefaultType);
+                LLVMValueRef leftVal = unifiedOperands.first();
+                LLVMValueRef rightVal = unifiedOperands.second();
+
+
+                ComparisonExp.Op op = ((ComparisonExp) jexp).getOperator();
+
+                String opStr = "";
+                if (op.equals(ComparisonExp.Op.CMP)) {
+                    opStr = "cmp";
+                } else if (op.equals(ComparisonExp.Op.CMPG)) {
+                    opStr = "cmpg";
+                } else if (op.equals(ComparisonExp.Op.CMPL)) {
+                    opStr = "cmpl";
+                } else {
+                    as.unreachable("Unexpected Op {}", op);
+                }
+
+                LLVMValueRef binOp = codeGen.buildBinaryOp(opStr, leftVal, rightVal, resType);
+                LLVMTypeRef binOpType = getValueType(binOp);
+                as.assertTrue(LLVM.LLVMGetTypeKind(binOpType) == LLVM.LLVMIntegerTypeKind,
+                        "The result type of value {} should be integer.", getLLVMStr(binOp));
+                return binOp;
+
             } else if (jexp instanceof ConditionExp) {
-                // TODO:
+                /*
+                 * T-Condition:
+                 *     A = B op C
+                 *  A::T  B::T1  C::T2
+                 * -------------------
+                 *     T1 = T2
+                 *     T = bool
+                 */
+
+                Optional<LLVMValueRef> opleftVal = tranRValue(left);
+                Optional<LLVMValueRef> oprightVal = tranRValue(right);
+                LLVMTypeRef conditionDefaultType = codeGen.buildIntType(32); // int
+                Pair<LLVMValueRef, LLVMValueRef> unifiedOperands = codeGen.unifyValues(opleftVal, oprightVal, conditionDefaultType);
+                LLVMValueRef leftVal = unifiedOperands.first();
+                LLVMValueRef rightVal = unifiedOperands.second();
+
+                ConditionExp.Op op = ((ConditionExp) jexp).getOperator();
+
+                String opStr = "";
+                if (op.equals(ConditionExp.Op.EQ)) {
+                    opStr = "==";
+                } else if (op.equals(ConditionExp.Op.GE)) {
+                    opStr = ">=";
+                } else if (op.equals(ConditionExp.Op.LT)) {
+                    opStr = "<";
+                } else if (op.equals(ConditionExp.Op.GT)) {
+                    opStr = ">";
+                } else if (op.equals(ConditionExp.Op.LE)) {
+                    opStr = "<=";
+                } else if (op.equals(ConditionExp.Op.NE)) {
+                    opStr = "!=";
+                } else {
+                    as.unreachable("Unexpected Op {}", op);
+                }
+
+                LLVMValueRef binOp = codeGen.buildBinaryOp(opStr, leftVal, rightVal, resType);
+                LLVMTypeRef binOpType = getValueType(binOp);
+                as.assertTrue(LLVM.LLVMGetTypeKind(binOpType) == LLVM.LLVMIntegerTypeKind && LLVM.LLVMGetIntTypeWidth(binOpType) == 1,
+                        "The result type of value {} should be integer.", getLLVMStr(binOp));
+                return binOp;
             } else if (jexp instanceof ShiftExp) {
-                // TODO:
+                /*
+                 * T-Shift:
+                 *     A = B op C
+                 *  A::T  B::T1  C::T2
+                 * -------------------
+                 *     T = T1 = T2
+                 */
+                LLVMValueRef leftVal = tranRValue(left, resType);
+                LLVMValueRef rightVal = tranRValue(right, resType);
+                ShiftExp.Op op = ((ShiftExp) jexp).getOperator();
+                String opStr = "";
+                if (op.equals(ShiftExp.Op.SHL)) {
+                    opStr = "shl";
+                } else if (op.equals(ShiftExp.Op.SHR)) {
+                    opStr = "shr";
+                } else if (op.equals(ShiftExp.Op.USHR)) {
+                    opStr = "ushr";
+                } else {
+                    as.unreachable("Unexpected Op {} {}", op, jexp);
+                }
+
+                LLVMValueRef binOp = codeGen.buildBinaryOp(opStr, leftVal, rightVal, resType);
+                return binOp;
             }
         } else if (jexp instanceof NewExp) { // Interface
             if (jexp instanceof NewArray) {
@@ -540,8 +681,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         } else if (jexp instanceof Var) {
             if (jexp.getType() instanceof NullType) {
-                as.assertTrue(outType.isPresent(), "We need the outType to generate a 'typed' null value");
-                LLVMValueRef typedNullVal = codeGen.buildNull(outType.get());
+                as.assertTrue(defaultType.isPresent(), "We need the outType to generate a 'typed' null value");
+                LLVMValueRef typedNullVal = codeGen.buildNull(defaultType.get());
                 return typedNullVal;
             } else {
                 Optional<LLVMValueRef> opvarPtr = maps.getVarMap((Var) jexp);
@@ -560,6 +701,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         as.unimplemented();
         return null;
     }
+
 
     public LLVMValueRef tranLValue(LValue jexp) {
         if (jexp instanceof FieldAccess) { // Abstract
