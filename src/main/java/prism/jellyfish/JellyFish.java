@@ -357,21 +357,21 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     // TODO:
                 }
             } else if (jstmt instanceof Goto) {
-                // TODO
+                // TODO:
             } else if (jstmt instanceof If) {
                 // TODO:
             }
         } else if (jstmt instanceof Return) {
             Var var = ((Return) jstmt).getValue();
             if (var == null) {
-                LLVMValueRef ret = codeGen.buildRet(null);
+                LLVMValueRef ret = codeGen.buildRet(Optional.empty());
                 return ret;
             } else {
                 Type jretType = jmethod.getReturnType();
                 LLVMTypeRef retType = tranType(jretType);
                 as.assertTrue(LLVM.LLVMGetTypeKind(retType) != LLVM.LLVMVoidTypeKind, "The none-void return stmt {} should not return void.", jstmt);
                 LLVMValueRef retVal = tranRValue(var, retType);
-                LLVMValueRef ret = codeGen.buildRet(retVal);
+                LLVMValueRef ret = codeGen.buildRet(Optional.of(retVal));
                 return ret;
             }
         } else if (jstmt instanceof Nop) {
@@ -401,7 +401,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
          * So that we don't have a type assumption of the resulting LLVM value.
          * It returns null if the result is an "untyped null"
          */
-        LLVMValueRef translateVal = tranRValueImpl(jexp, Optional.ofNullable(null));
+        LLVMValueRef translateVal = tranRValueImpl(jexp, Optional.empty());
         return Optional.ofNullable(translateVal);
     }
 

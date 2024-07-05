@@ -158,12 +158,12 @@ public class LLVMCodeGen {
         return load;
     }
 
-    public LLVMValueRef buildRet(LLVMValueRef retVal) {
-        if (retVal == null) {
+    public LLVMValueRef buildRet(Optional<LLVMValueRef> retVal) {
+        if (retVal.isEmpty()) {
             LLVMValueRef ret = LLVM.LLVMBuildRetVoid(builder);
             return ret;
         } else {
-            LLVMValueRef ret = LLVM.LLVMBuildRet(builder, retVal);
+            LLVMValueRef ret = LLVM.LLVMBuildRet(builder, retVal.get());
             return ret;
         }
     }
