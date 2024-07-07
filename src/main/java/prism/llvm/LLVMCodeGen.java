@@ -5,10 +5,11 @@ import org.apache.logging.log4j.Logger;
 import org.bytedeco.llvm.LLVM.*;
 import org.bytedeco.llvm.global.LLVM;
 import pascal.taie.util.collection.Pair;
-import prism.jellyfish.JellyFish;
 import prism.jellyfish.util.ArrayBuilder;
 import prism.jellyfish.util.AssertUtil;
 
+
+import javax.annotation.Nullable;
 
 import static prism.llvm.LLVMUtil.getValueType;
 import static prism.llvm.LLVMUtil.getLLVMStr;
@@ -42,6 +43,10 @@ public class LLVMCodeGen {
      * Top-level commands
      */
     public void generate() {
+        byte[] errMsg = new byte[4096];
+        int ret = LLVM.LLVMVerifyModule(module, LLVM.LLVMPrintMessageAction, errMsg);
+        as.assertTrue(ret == 0, "Verify module failed: {}", String.valueOf(errMsg));
+
         LLVM.LLVMWriteBitcodeToFile(module, bcFile);
     }
 
@@ -51,9 +56,6 @@ public class LLVMCodeGen {
      * 1. Add IR elements into the module.
      * 2. Retrieve IR elements from the module.
      */
-    // public addClass(LLVMTypeRef classType) {
-    //     module.
-    // }
 
     public LLVMValueRef addGlobalVariable(LLVMTypeRef type, String name) {
         return LLVM.LLVMAddGlobal(module, type, name);
@@ -65,7 +67,7 @@ public class LLVMCodeGen {
     }
 
     public LLVMBasicBlockRef addBasicBlock(LLVMValueRef func, String blockName) {
-        LLVMBasicBlockRef blockRef = LLVM.LLVMAppendBasicBlock(func, blockName);
+        LLVMBasicBlockRef blockRef = LLVM.LLVMAppendBasicBlockInContext(context, func, blockName);
         return blockRef;
     }
 
@@ -100,20 +102,25 @@ public class LLVMCodeGen {
         return;
     }
 
+    public LLVMTypeRef buildPointerType(LLVMTypeRef elementType) {
+        LLVMTypeRef ptrType = LLVM.LLVMPointerType(elementType, 0);
+        return ptrType;
+    }
+
     public LLVMTypeRef buildVoidType() {
-        return LLVM.LLVMVoidType();
+        return LLVM.LLVMVoidTypeInContext(context);
     }
 
     public LLVMTypeRef buildIntType(int bits) {
-        return LLVM.LLVMIntType(bits);
+        return LLVM.LLVMIntTypeInContext(context, bits);
     }
 
     public LLVMTypeRef buildFloatType() {
-        return LLVM.LLVMFloatType();
+        return LLVM.LLVMFloatTypeInContext(context);
     }
 
     public LLVMTypeRef buildDoubleType() {
-        return LLVM.LLVMDoubleType();
+        return LLVM.LLVMDoubleTypeInContext(context);
     }
 
     public LLVMTypeRef buildArrayType(LLVMTypeRef baseType, int length) {
@@ -137,6 +144,11 @@ public class LLVMCodeGen {
     public LLVMValueRef buildNull(LLVMTypeRef type) {
         LLVMValueRef llvmNull = LLVM.LLVMConstNull(type);
         return llvmNull;
+    }
+
+    public LLVMValueRef buildConstString(String str) {
+        LLVMValueRef llvmStr = LLVM.LLVMBuildGlobalString(builder, str, "str");
+        return llvmStr;
     }
 
     /*
@@ -448,6 +460,44 @@ public class LLVMCodeGen {
     public LLVMValueRef buildNop() {
         // TODO: change it to call.
         return LLVM.LLVMConstNull(LLVM.LLVMInt1Type());
+    }
+
+    @Nullable
+    public LLVMValueRef buildCall(LLVMValueRef func, List<LLVMValueRef> args) {
+
+        as.assertTrue(args.size() == LLVM.LLVMCountParams(func),
+                "The argument number doesn't match. Func: {}. Args: {}", func, args.stream().map(arg -> getLLVMStr(arg)).toList());
+
+        ArrayBuilder<LLVMValueRef> argArray = new ArrayBuilder<>();
+        for (int i = 0; i < args.size(); i++) {
+            LLVMValueRef param = LLVM.LLVMGetParam(func, i);
+            LLVMTypeRef paramType = getValueType(param);
+            LLVMValueRef arg = args.get(i);
+            LLVMTypeRef argType = getValueType(arg);
+
+            as.assertTrue(paramType.equals(argType),
+                    "The {}th parameter and argument don't match type. Arg: {}. Param: {}.",
+                    i, getLLVMStr(arg), getLLVMStr(param));
+            argArray.add(arg);
+        }
+
+        LLVMTypeRef funcPtrType = getValueType(func);
+        as.assertTrue(LLVM.LLVMGetTypeKind(funcPtrType) == LLVM.LLVMPointerTypeKind, "Should be function pointer type");
+        LLVMTypeRef retType = LLVM.LLVMGetReturnType(LLVM.LLVMGetElementType(funcPtrType));
+
+        if (LLVM.LLVMGetTypeKind(retType) == LLVM.LLVMVoidTypeKind) {
+            LLVMValueRef call = LLVM.LLVMBuildCall(builder, func, argArray.build(), argArray.length(), "");
+            return null;
+        } else {
+            LLVMValueRef call = LLVM.LLVMBuildCall(builder, func, argArray.build(), argArray.length(), "call");
+            return call;
+        }
+
+    }
+
+    public LLVMValueRef buildMalloc(LLVMTypeRef type) {
+        // TODO: maybe replace malloc with a special intrinsic "new".
+        return LLVM.LLVMBuildMalloc(builder, type, "new");
     }
 
 }

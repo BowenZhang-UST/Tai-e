@@ -17,35 +17,25 @@ public class AssertUtil {
         System.exit(-1);
     }
 
-    private String myFormat(String s, Object... params) {
-        // Input: "Format: {} {}"
-        // Output: "Format: {0} {1}"
-        int i = 0;
-        while (s.contains("{}")) {
-            s = s.replaceFirst(Pattern.quote("{}"), "{" + i++ + "}");
-        }
-        return MessageFormat.format(s, params);
-    }
-
     public void assertTrue(boolean condition, String errMsg, Object... strParams) {
         if (!condition) {
-            String userStr = myFormat(errMsg, strParams);
-            logger.error("Assertion fail: {}", userStr);
+            logger.error("Assertion fail:");
+            logger.error(errMsg, strParams);
             exit();
         }
     }
 
     public void assertFalse(boolean condition, String errMsg, Object... strParams) {
         if (condition) {
-            String userStr = myFormat(errMsg, strParams);
-            logger.error("Assertion fail: {}", userStr);
+            logger.error("Assertion fail:");
+            logger.error(errMsg, strParams);
             exit();
         }
     }
 
     public void unreachable(String errMsg, Object... strParams) {
-        String userStr = myFormat(errMsg, strParams);
-        logger.error("Unreachable: {}", userStr);
+        logger.error("Unreachable:");
+        logger.error(errMsg, strParams);
         exit();
     }
 

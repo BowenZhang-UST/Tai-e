@@ -25,12 +25,14 @@ public class Mappings {
     public HashMap<JMethod, LLVMValueRef> methodMap;
     public HashMap<Var, LLVMValueRef> varMap;
     public HashMap<JField, LLVMValueRef> staticFieldMap;
+    public HashMap<String, LLVMValueRef> stringPoolMap;
 
     public Mappings() {
         this.classMap = new HashMap<>();
         this.methodMap = new HashMap<>();
         this.varMap = new HashMap<>();
         this.staticFieldMap = new HashMap<>();
+        this.stringPoolMap = new HashMap<>();
     }
 
     private <K, V> boolean setMap(HashMap<K, V> m, K key, V value) {
@@ -113,6 +115,18 @@ public class Mappings {
 
     public Optional<LLVMValueRef> getStaticFieldMap(JField jfield) {
         return getFromMap(staticFieldMap, jfield);
+    }
+
+    /*
+     * String Pool:
+     * String => A pointer to a string class object (which is a pointer to struct).
+     */
+    public boolean setStringPoolMap(String str, LLVMValueRef llvmVal) {
+        return setMap(stringPoolMap, str, llvmVal);
+    }
+
+    public Optional<LLVMValueRef> getStringPoolMap(String str) {
+        return getFromMap(stringPoolMap, str);
     }
 
 
