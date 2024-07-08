@@ -1,4 +1,4 @@
-// Tests: binary operations of integer and real types.
+// Tests: binary operations of string type.
 public class Class9 {
     static String f1;
     static String f2;
@@ -6,8 +6,8 @@ public class Class9 {
 
     static {
         f1 = "abc";
-//        f2 = new String("efg");
-//        f3 = new String(f1);
+        f2 = new String("efg");
+        f3 = new String(f1);
     }
 
     public static void main(String[] args) {

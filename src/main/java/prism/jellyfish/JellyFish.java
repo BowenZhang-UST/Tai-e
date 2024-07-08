@@ -283,7 +283,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
         } else if (jType instanceof ReferenceType) {
             if (jType instanceof ArrayType) {
                 Type jBaseType = ((ArrayType) jType).baseType();
-                Type jElementType = ((ArrayType) jType).elementType();
                 int dimension = ((ArrayType) jType).dimensions();
 
                 LLVMTypeRef baseType = this.tranType(jBaseType);
@@ -593,7 +592,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         } else if (jexp instanceof UnaryExp) { // Interface
             if (jexp instanceof ArrayLengthExp) {
-                // TODO:
+                Var arrayVar = ((ArrayLengthExp) jexp).getBase();
+                Type resType = jexp.getType();
+
+                LLVMValueRef llvmArrayPtr = tranRValue(arrayVar, codeGen.buildPointerType(codeGen.buildIntType(32)), true);
+                return codeGen.buildLength(llvmArrayPtr);
             } else if (jexp instanceof NegExp) {
                 // TODO:
             }
@@ -771,9 +774,37 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMValueRef object = codeGen.buildMalloc(llvmObjType);
                 return object;
             } else if (jexp instanceof NewArray) {
-                // TODO:
+                ArrayType jarrayType = ((NewArray) jexp).getType();
+                LLVMTypeRef newedType = tranType(jarrayType);
+                Type jbaseType = jarrayType.baseType();
+                as.assertFalse(jbaseType instanceof ArrayType, "Unexpected base type {}", jbaseType);
+
+                LLVMTypeRef llvmBaseType = tranTypeAlloc(jbaseType);
+                LLVMValueRef llvmBaseSizeConst = codeGen.buildSizeOf(llvmBaseType);
+
+                Var lengthVar = ((NewArray) jexp).getLength();
+                LLVMValueRef length = tranRValue((RValue) lengthVar, codeGen.buildIntType(32), true);
+                LLVMValueRef object = codeGen.buildNewArray(llvmBaseSizeConst, List.of(length), newedType);
+                return object;
+
             } else if (jexp instanceof NewMultiArray) {
-                // TODO:
+                ArrayType jarrayType = ((NewMultiArray) jexp).getType();
+                LLVMTypeRef newedType = tranType(jarrayType);
+                Type jbaseType = jarrayType.baseType();
+                as.assertFalse(jbaseType instanceof ArrayType, "Unexpected base type {}", jbaseType);
+
+                LLVMTypeRef llvmBaseType = tranTypeAlloc(jbaseType);
+                LLVMValueRef llvmBaseSizeConst = codeGen.buildSizeOf(llvmBaseType);
+
+                List<Var> lengthVars = ((NewMultiArray) jexp).getLengths();
+                List<LLVMValueRef> lengths = new ArrayList<>();
+                for (int d = 0; d < lengthVars.size(); d++) {
+                    LLVMValueRef theLength = tranRValue((RValue) lengthVars.get(d), codeGen.buildIntType(32), true);
+                    lengths.add(theLength);
+                }
+                LLVMValueRef object = codeGen.buildNewArray(llvmBaseSizeConst, lengths, newedType);
+                return object;
+
             }
         } else if (jexp instanceof InvokeExp) { // Abstract
             if (jexp instanceof InvokeStatic) {
@@ -836,7 +867,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 return llvmVal;
             }
         } else if (jexp instanceof ArrayAccess) {
-            // TODO:
+            // DOING:
+            Var baseVar = ((ArrayAccess) jexp).getBase();
+            Var indexVar = ((ArrayAccess) jexp).getIndex();
+
+
         } else if (jexp instanceof CastExp) {
             // TODO:
         } else if (jexp instanceof InstanceOfExp) {
@@ -870,7 +905,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMValueRef ptr = opVarPtr.get();
             return ptr;
         } else if (jexp instanceof ArrayAccess) {
-            // TODO:
+            // DOING:
         }
         as.unimplemented();
         return null;

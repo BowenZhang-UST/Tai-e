@@ -14,6 +14,7 @@ import javax.annotation.Nullable;
 import static prism.llvm.LLVMUtil.getValueType;
 import static prism.llvm.LLVMUtil.getLLVMStr;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -30,6 +31,20 @@ public class LLVMCodeGen {
 
     private static final Logger logger = LogManager.getLogger(LLVMCodeGen.class);
     private static final AssertUtil as = new AssertUtil(logger);
+
+    public enum IntrinsicID {
+        JELLYFISH_NEWARRAY("jellyfish.newarray"),
+        JELLYFISH_LENGTH("jellyfish.length");
+        private final String name;
+
+        IntrinsicID(String name) {
+            this.name = name;
+        }
+
+        public String getName() {
+            return name;
+        }
+    }
 
     public LLVMCodeGen() {
         this.moduleName = "module";
@@ -48,6 +63,56 @@ public class LLVMCodeGen {
         as.assertTrue(ret == 0, "Verify module failed: {}", String.valueOf(errMsg));
 
         LLVM.LLVMWriteBitcodeToFile(module, bcFile);
+    }
+
+    public static String getIntrinsicName(IntrinsicID ID, Object... params) {
+        switch (ID) {
+            case JELLYFISH_LENGTH: {
+                return String.format("%s", ID.getName());
+            }
+            case JELLYFISH_NEWARRAY: {
+                Integer dimension = (Integer) params[0];
+                return String.format("%s.%d", ID.getName(), dimension);
+            }
+        }
+        as.unreachable("Unexpected case {} {}", ID, params);
+        return "";
+    }
+
+    public LLVMValueRef getOrCreateIntrinsic(IntrinsicID ID, Object... params) {
+        String intrinsicName = getIntrinsicName(ID, params);
+        LLVMValueRef intrinsic = LLVM.LLVMGetNamedFunction(module, intrinsicName);
+        if (intrinsic != null) {
+            return intrinsic;
+        }
+        switch (ID) {
+            case JELLYFISH_LENGTH: {
+                // i32 jellyfish.length(i32* arrayPtr)
+                LLVMTypeRef jellyfishNewTy = buildFunctionType(
+                        buildIntType(32),
+                        List.of(buildPointerType(buildIntType(32)))
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishNewTy, intrinsicName);
+                return ret;
+            }
+            case JELLYFISH_NEWARRAY: {
+                // i32* jellyfish.new(i32 baseSize, i32... lengths)
+                List<LLVMTypeRef> paramTypes = new ArrayList<>();
+                paramTypes.add(buildIntType(32));
+                Integer dimension = (Integer) params[0];
+                for (int d = 0; d < dimension; d++) {
+                    paramTypes.add(buildIntType(32));
+                }
+                LLVMTypeRef jellyfishLengthTy = buildFunctionType(
+                        buildIntType(32),
+                        paramTypes
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishLengthTy, intrinsicName);
+                return ret;
+            }
+        }
+        as.unreachable("Unexpected case: {} {}", ID, params);
+        return null;
     }
 
 
@@ -149,6 +214,12 @@ public class LLVMCodeGen {
     public LLVMValueRef buildConstString(String str) {
         LLVMValueRef llvmStr = LLVM.LLVMBuildGlobalString(builder, str, "str");
         return llvmStr;
+    }
+
+    public LLVMValueRef buildSizeOf(LLVMTypeRef type) {
+        LLVMValueRef sizeof = LLVM.LLVMSizeOf(type);
+        as.assertTrue(sizeof != null, "Unexpected value");
+        return sizeof;
     }
 
     /*
@@ -458,7 +529,7 @@ public class LLVMCodeGen {
     }
 
     public LLVMValueRef buildNop() {
-        // TODO: change it to call.
+        // TODO: change it to intrisic.
         return LLVM.LLVMConstNull(LLVM.LLVMInt1Type());
     }
 
@@ -466,7 +537,7 @@ public class LLVMCodeGen {
     public LLVMValueRef buildCall(LLVMValueRef func, List<LLVMValueRef> args) {
 
         as.assertTrue(args.size() == LLVM.LLVMCountParams(func),
-                "The argument number doesn't match. Func: {}. Args: {}", func, args.stream().map(arg -> getLLVMStr(arg)).toList());
+                "The argument number doesn't match. Func: {}. Args: {}", getLLVMStr(func), args.stream().map(arg -> getLLVMStr(arg)).toList());
 
         ArrayBuilder<LLVMValueRef> argArray = new ArrayBuilder<>();
         for (int i = 0; i < args.size(); i++) {
@@ -499,5 +570,35 @@ public class LLVMCodeGen {
         // TODO: maybe replace malloc with a special intrinsic "new".
         return LLVM.LLVMBuildMalloc(builder, type, "new");
     }
+
+    public LLVMValueRef buildNewArray(LLVMValueRef baseSize, List<LLVMValueRef> lengths, LLVMTypeRef retType) {
+
+        LLVMValueRef jellyfishNew = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_NEWARRAY, Integer.valueOf(lengths.size()));
+
+        List<LLVMValueRef> params = new ArrayList<>();
+        params.add(buildTypeCast(baseSize, buildIntType(32)));
+        for (int d = 0; d < lengths.size(); d++) {
+            LLVMValueRef theLength = buildTypeCast(lengths.get(d), buildIntType(32));
+            params.add(theLength);
+        }
+
+        LLVMValueRef newedVal = buildCall(
+                jellyfishNew,
+                params
+        );
+        return buildTypeCast(newedVal, retType);
+    }
+
+    public LLVMValueRef buildLength(LLVMValueRef arrayPtr) {
+        LLVMValueRef jellyfishLength = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_LENGTH);
+        LLVMValueRef length = buildCall(
+                jellyfishLength,
+                List.of(
+                        buildTypeCast(arrayPtr, buildPointerType(buildIntType(32)))
+                )
+        );
+        return length;
+    }
+
 
 }
