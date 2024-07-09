@@ -6,38 +6,33 @@ import pascal.taie.World;
 import pascal.taie.analysis.ProgramAnalysis;
 import pascal.taie.ir.IR;
 import pascal.taie.ir.exp.*;
+import pascal.taie.ir.stmt.*;
+import pascal.taie.language.classes.*;
+import pascal.taie.language.type.*;
 import pascal.taie.ir.proginfo.FieldRef;
 import pascal.taie.ir.proginfo.MethodRef;
-import pascal.taie.ir.stmt.*;
 import pascal.taie.config.AnalysisConfig;
+import pascal.taie.util.collection.Pair;
 
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
 
-import pascal.taie.language.classes.*;
-import pascal.taie.language.type.*;
-
-
-import java.lang.reflect.Method;
 import java.util.*;
 import java.util.stream.Collectors;
-
 
 import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
 import org.bytedeco.llvm.global.LLVM;
 
-import pascal.taie.util.collection.Pair;
-import prism.jellyfish.util.AssertUtil;
 import prism.llvm.LLVMCodeGen;
+import prism.jellyfish.util.AssertUtil;
 import prism.jellyfish.util.StringUtil;
 
-import javax.annotation.Nullable;
-
-import static java.util.List.of;
 import static prism.llvm.LLVMUtil.getElementType;
 import static prism.llvm.LLVMUtil.getValueType;
 import static prism.llvm.LLVMUtil.getLLVMStr;
+
+import javax.annotation.Nullable;
 
 
 public class JellyFish extends ProgramAnalysis<Void> {
@@ -421,7 +416,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMValueRef llvmValue = tranRValue(rvalue, llvmPtrElTy, enableImplicitCast);
                 LLVMValueRef store = codeGen.buildStore(llvmPtr, llvmValue);
 
-                resInsts.addAll(of(llvmPtr, llvmValue, store));
+                resInsts.addAll(List.of(llvmPtr, llvmValue, store));
                 return resInsts;
             } else if (jstmt instanceof Invoke) {
                 Var var = ((Invoke) jstmt).getLValue();
@@ -443,7 +438,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
                     LLVMValueRef store = codeGen.buildStore(llvmPtr, llvmCall);
 
-                    resInsts.addAll(of(llvmPtr, llvmCall, store));
+                    resInsts.addAll(List.of(llvmPtr, llvmCall, store));
                     return resInsts;
                 } else {
                     Optional<LLVMValueRef> opllvmCall = tranRValue(invokeExp);
