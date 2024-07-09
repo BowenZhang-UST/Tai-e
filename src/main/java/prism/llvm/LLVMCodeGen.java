@@ -7,6 +7,7 @@ import org.bytedeco.llvm.global.LLVM;
 import pascal.taie.util.collection.Pair;
 import prism.jellyfish.util.ArrayBuilder;
 import prism.jellyfish.util.AssertUtil;
+import prism.jellyfish.util.StringUtil;
 
 
 import javax.annotation.Nullable;
@@ -34,7 +35,10 @@ public class LLVMCodeGen {
 
     public enum IntrinsicID {
         JELLYFISH_NEWARRAY("jellyfish.newarray"),
-        JELLYFISH_LENGTH("jellyfish.length");
+        JELLYFISH_LENGTH("jellyfish.length"),
+        JELLYFISH_MONITOR_ENTER("jellyfish.monitor.enter"),
+        JELLYFISH_MONITOR_EXIT("jellyfish.monitor.exit"),
+        JELLYFISH_INSTANCEOF("jellyfish.instanceof");
         private final String name;
 
         IntrinsicID(String name) {
@@ -74,6 +78,15 @@ public class LLVMCodeGen {
                 Integer dimension = (Integer) params[0];
                 return String.format("%s.%d", ID.getName(), dimension);
             }
+            case JELLYFISH_MONITOR_ENTER: {
+            }
+            case JELLYFISH_MONITOR_EXIT: {
+                return String.format("%s", ID.getName());
+            }
+            case JELLYFISH_INSTANCEOF: {
+                String typeStr = (String) params[0];
+                return String.format("%s.%s", ID.getName(), typeStr);
+            }
         }
         as.unreachable("Unexpected case {} {}", ID, params);
         return "";
@@ -108,6 +121,35 @@ public class LLVMCodeGen {
                         paramTypes
                 );
                 LLVMValueRef ret = this.addFunction(jellyfishLengthTy, intrinsicName);
+                return ret;
+            }
+            case JELLYFISH_MONITOR_ENTER: {
+                // i32* jellyfish.monitorenter.[unique id](%java.lang.Object* val)
+            }
+            case JELLYFISH_MONITOR_EXIT: {
+                // i32* jellyfish.monitorexit.[unique id](%java.lang.Object* val)
+                LLVMTypeRef objType = (LLVMTypeRef) params[0];
+
+                LLVMTypeRef jellyfishMonitorTy = buildFunctionType(
+                        buildVoidType(),
+                        List.of(objType)
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishMonitorTy, intrinsicName);
+                return ret;
+            }
+            case JELLYFISH_INSTANCEOF: {
+                // i32* jellyfish.instanceof.[unique id](%java.lang.Object* val, [Type corresponding to specific Class] checkedType)
+                LLVMTypeRef checkType = (LLVMTypeRef) params[1];
+                LLVMTypeRef objectType = (LLVMTypeRef) params[2];
+
+                LLVMTypeRef jellyfishInstanceOfTy = buildFunctionType(
+                        buildIntType(1),
+                        List.of(
+                                objectType,
+                                checkType
+                        )
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishInstanceOfTy, intrinsicName);
                 return ret;
             }
         }
@@ -589,6 +631,10 @@ public class LLVMCodeGen {
 
     }
 
+    /*
+     * Intrinsic builders
+     */
+
     public LLVMValueRef buildMalloc(LLVMTypeRef type) {
         // TODO: maybe replace malloc with a special intrinsic "new".
         return LLVM.LLVMBuildMalloc(builder, type, "new");
@@ -621,6 +667,42 @@ public class LLVMCodeGen {
                 )
         );
         return length;
+    }
+
+
+    public LLVMValueRef buildMonitorEnter(LLVMValueRef obj, LLVMTypeRef objectType) {
+
+        LLVMValueRef jellyfishMonitor = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_MONITOR_ENTER, objectType);
+        LLVMValueRef monitor = buildCall(
+                jellyfishMonitor,
+                List.of(
+                        obj
+                )
+        );
+        return monitor;
+    }
+
+    public LLVMValueRef buildMonitorExit(LLVMValueRef obj, LLVMTypeRef objectType) {
+
+        LLVMValueRef jellyfishMonitor = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_MONITOR_EXIT, objectType);
+        LLVMValueRef monitor = buildCall(
+                jellyfishMonitor,
+                List.of(
+                        obj
+                )
+        );
+        return monitor;
+    }
+
+    public LLVMValueRef buildInstanceOf(LLVMValueRef obj, LLVMTypeRef checkType, LLVMTypeRef objectType) {
+        String typeStrAscii = StringUtil.getAscii(getLLVMStr(checkType));
+
+        LLVMValueRef jellyfishInstanceOf = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_INSTANCEOF, typeStrAscii, checkType, objectType);
+        LLVMValueRef instanceOf = buildCall(
+                jellyfishInstanceOf,
+                List.of(buildTypeCast(obj, objectType), buildNull(checkType))
+        );
+        return instanceOf;
     }
 
 

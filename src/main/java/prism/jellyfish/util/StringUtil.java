@@ -41,4 +41,13 @@ public class StringUtil {
         return String.format("load.%s", realVarName);
     }
 
+    public static String getAscii(String str) {
+        String res = "";
+        for (char c : str.toCharArray()) {
+            int ic = (int) c;
+            res += String.valueOf(ic);
+        }
+        return res;
+    }
+
 }

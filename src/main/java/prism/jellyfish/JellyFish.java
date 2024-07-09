@@ -31,7 +31,6 @@ import prism.jellyfish.util.AssertUtil;
 import prism.llvm.LLVMCodeGen;
 import prism.jellyfish.util.StringUtil;
 
-
 import javax.annotation.Nullable;
 
 import static java.util.List.of;
@@ -470,10 +469,42 @@ public class JellyFish extends ProgramAnalysis<Void> {
             resInsts.add(nop);
             return resInsts;
         } else if (jstmt instanceof Monitor) {
-            // TODO:
+            Var obj = ((Monitor) jstmt).getObjectRef();
+            JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
+            LLVMTypeRef objectType = tranType(objClass.getType());
+
+            LLVMValueRef llvmObj = tranRValue(obj, objectType, true);
+
+            if (((Monitor) jstmt).isEnter()) {
+                LLVMValueRef enter = codeGen.buildMonitorEnter(llvmObj, objectType);
+                return resInsts;
+            } else {
+                LLVMValueRef exit = codeGen.buildMonitorExit(llvmObj, objectType);
+                return resInsts;
+            }
         }
         as.unreachable("Unexpected statement: {}", jstmt);
         return null;
+    }
+
+    public Optional<LLVMValueRef> tranRValue(RValue jexp) {
+        /* Translate RValue without a specified out Type.
+         * So that we don't have a type assumption of the resulting LLVM value.
+         * It returns null if the result is an "untyped null"
+         */
+        LLVMValueRef translateVal = tranRValueImpl(jexp, Optional.empty());
+        return Optional.ofNullable(translateVal);
+    }
+
+    public LLVMValueRef tranRValue(RValue jexp, LLVMTypeRef defaultType) {
+        /* Translate RValue with a default out Type.
+         * The result must not be null
+         */
+        as.assertTrue(defaultType != null, "Need to specify an default type to in case of null value");
+
+        LLVMValueRef translatedVal = tranRValueImpl(jexp, Optional.of(defaultType));  // pass in as default type
+        as.assertTrue(translatedVal != null, "We can't obtain a null value when using a default out type.");
+        return translatedVal;
     }
 
     public LLVMValueRef tranRValue(RValue jexp, LLVMTypeRef outType, boolean autoCast) {
@@ -481,6 +512,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
          * So that the resulting LLVM value would either be:
          * enforced with a type check (autoCast = false)
          * Automatically casted to the outType (autoCast = true)
+         * Also, we would use it as the default type.
          */
         as.assertTrue(outType != null, "Need to specify an out type to get a LLVM value with this type.");
 
@@ -496,15 +528,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
                             " Translated Val: {}. Out Type: {}", getLLVMStr(translatedVal), getLLVMStr(outType));
             return translatedVal;
         }
-    }
-
-    public Optional<LLVMValueRef> tranRValue(RValue jexp) {
-        /* Translate RValue without a specified out Type.
-         * So that we don't have a type assumption of the resulting LLVM value.
-         * It returns null if the result is an "untyped null"
-         */
-        LLVMValueRef translateVal = tranRValueImpl(jexp, Optional.empty());
-        return Optional.ofNullable(translateVal);
     }
 
     @Nullable
@@ -814,47 +837,39 @@ public class JellyFish extends ProgramAnalysis<Void> {
             } else if (jexp instanceof InvokeDynamic) {
                 // TODO:
             } else if (jexp instanceof InvokeInstanceExp) { // Abstract
-                if (jexp instanceof InvokeSpecial) {
+                Var thisVar = ((InvokeInstanceExp) jexp).getBase();
+                MethodRef methodRef = ((InvokeInstanceExp) jexp).getMethodRef();
+                JMethod callee = methodRef.resolveNullable();
+                if (callee != null) {
+                    /*
+                     * T-Invoke Instance:
+                     *     F(B1, B2...)
+                     *   F::T1->T2  B::T3 B2...::T4
+                     * ---------------------------
+                     *     T3 = T1   T4 = T2
+                     */
+                    LLVMValueRef llvmCallee = getOrTranMethod(callee);
+                    as.assertTrue(LLVM.LLVMCountParams(llvmCallee) == ((InvokeInstanceExp) jexp).getArgCount() + 1,
+                            "Argument number doesn't match. LLVM func: {}, java invoke: {}", getLLVMStr(llvmCallee), jexp);
 
-                    Var thisVar = ((InvokeSpecial) jexp).getBase();
+                    LLVMValueRef llvm0thParam = LLVM.LLVMGetParam(llvmCallee, 0);
+                    LLVMValueRef llvmThis = tranRValue(thisVar, getValueType(llvm0thParam), true);
+                    List<LLVMValueRef> args = new ArrayList<>();
+                    args.add(llvmThis);
 
-                    MethodRef methodRef = ((InvokeSpecial) jexp).getMethodRef();
-                    JMethod callee = methodRef.resolveNullable();
-                    if (callee != null) {
-                        /*
-                         * T-Invoke Special:
-                         *     F(B1, B2...)
-                         *   F::T1->T2  B::T3 B2...::T4
-                         * ---------------------------
-                         *     T3 = T1   T4 = T2
-                         */
-                        LLVMValueRef llvmCallee = getOrTranMethod(callee);
-                        as.assertTrue(LLVM.LLVMCountParams(llvmCallee) == ((InvokeSpecial) jexp).getArgCount() + 1,
-                                "Argument number doesn't match. LLVM func: {}, java invoke: {}", getLLVMStr(llvmCallee), jexp);
-
-                        LLVMValueRef llvm0thParam = LLVM.LLVMGetParam(llvmCallee, 0);
-                        LLVMValueRef llvmThis = tranRValue(thisVar, getValueType(llvm0thParam), true);
-                        List<LLVMValueRef> args = new ArrayList<>();
-                        args.add(llvmThis);
-
-                        List<Var> jargs = ((InvokeSpecial) jexp).getArgs();
-                        for (int i = 1; i < jargs.size() + 1; i++) {
-                            LLVMValueRef llvmIthParam = LLVM.LLVMGetParam(llvmCallee, i);
-                            Var jarg = jargs.get(i - 1);
-                            LLVMValueRef llvmArg = tranRValue(jarg, getValueType(llvmIthParam), true);
-                            args.add(llvmArg);
-                        }
-                        LLVMValueRef call = codeGen.buildCall(llvmCallee, args);
-                        return call;
-                    } else {
-                        // TODO: unknown calling target
-                        as.unimplemented();
-                        return null;
+                    List<Var> jargs = ((InvokeInstanceExp) jexp).getArgs();
+                    for (int i = 1; i < jargs.size() + 1; i++) {
+                        LLVMValueRef llvmIthParam = LLVM.LLVMGetParam(llvmCallee, i);
+                        Var jarg = jargs.get(i - 1);
+                        LLVMValueRef llvmArg = tranRValue(jarg, getValueType(llvmIthParam), true);
+                        args.add(llvmArg);
                     }
-                } else if (jexp instanceof InvokeInterface) {
-                    // TODO:
-                } else if (jexp instanceof InvokeVirtual) {
-                    // TODO:
+                    LLVMValueRef call = codeGen.buildCall(llvmCallee, args);
+                    return call;
+                } else {
+                    // TODO: unknown call target
+                    as.unimplemented();
+                    return null;
                 }
             }
         } else if (jexp instanceof Var) {
@@ -898,7 +913,17 @@ public class JellyFish extends ProgramAnalysis<Void> {
         } else if (jexp instanceof CastExp) {
             // TODO:
         } else if (jexp instanceof InstanceOfExp) {
-            // TODO:
+            JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
+            LLVMTypeRef objectType = tranType(objClass.getType());
+
+            Type jcheckType = ((InstanceOfExp) jexp).getCheckedType();
+            LLVMTypeRef checkType = tranType(jcheckType);
+
+            Var var = ((InstanceOfExp) jexp).getValue();
+            LLVMValueRef checkValue = tranRValue(var, objectType, true);
+
+            LLVMValueRef instanceOf = codeGen.buildInstanceOf(checkValue, checkType, objectType);
+            return instanceOf;
         }
         as.unimplemented();
         return null;
