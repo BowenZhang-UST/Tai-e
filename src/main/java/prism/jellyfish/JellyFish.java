@@ -385,7 +385,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LValue lvalue = ((AssignStmt<?, ?>) jstmt).getLValue();
                 RValue rvalue = ((AssignStmt<?, ?>) jstmt).getRValue();
 
-                if (lvalue.getType() instanceof NullType) {
+                Type ltype = lvalue.getType();
+                Type rtype = rvalue.getType();
+
+                if (ltype instanceof NullType) {
                     LLVMValueRef nop = codeGen.buildNop();
                     resInsts.add(nop);
                     return resInsts;
@@ -402,7 +405,18 @@ public class JellyFish extends ProgramAnalysis<Void> {
                  * -------------------
                  *       T2 = T3
                  */
-                LLVMValueRef llvmValue = tranRValue(rvalue, llvmPtrElTy, false);
+                boolean enableImplicitCast;
+                if (ltype instanceof ClassType &&
+                        rtype instanceof ClassType &&
+                        classHierarchy.isSubclass(
+                                ((ClassType) ltype).getJClass(),
+                                ((ClassType) rtype).getJClass())) {
+                    // Enable implicit type conversion only if left is super type of right
+                    enableImplicitCast = true;
+                } else {
+                    enableImplicitCast = false;
+                }
+                LLVMValueRef llvmValue = tranRValue(rvalue, llvmPtrElTy, enableImplicitCast);
                 LLVMValueRef store = codeGen.buildStore(llvmPtr, llvmValue);
 
                 resInsts.addAll(of(llvmPtr, llvmValue, store));
@@ -829,7 +843,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 }
                 LLVMValueRef object = codeGen.buildNewArray(llvmBaseSizeConst, lengths, newedType);
                 return object;
-
             }
         } else if (jexp instanceof InvokeExp) { // Abstract
             if (jexp instanceof InvokeStatic) {
@@ -911,7 +924,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
             return load;
 
         } else if (jexp instanceof CastExp) {
-            // TODO:
+            Var var = ((CastExp) jexp).getValue();
+            Type castType = ((CastExp) jexp).getCastType();
+            LLVMTypeRef targetType = tranType(castType);
+            LLVMValueRef llvmVal = tranRValue(var, targetType, true);
+            return llvmVal;
         } else if (jexp instanceof InstanceOfExp) {
             JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
             LLVMTypeRef objectType = tranType(objClass.getType());
