@@ -70,95 +70,6 @@ public class LLVMCodeGen {
         LLVM.LLVMWriteBitcodeToFile(module, bcFile);
     }
 
-    public static String getIntrinsicName(IntrinsicID ID, Object... params) {
-        switch (ID) {
-            case JELLYFISH_LENGTH: {
-                return String.format("%s", ID.getName());
-            }
-            case JELLYFISH_NEWARRAY: {
-                Integer dimension = (Integer) params[0];
-                return String.format("%s.%d", ID.getName(), dimension);
-            }
-            case JELLYFISH_MONITOR_ENTER: {
-            }
-            case JELLYFISH_MONITOR_EXIT: {
-                return String.format("%s", ID.getName());
-            }
-            case JELLYFISH_INSTANCEOF: {
-                String typeStr = (String) params[0];
-                return String.format("%s.%s", ID.getName(), typeStr);
-            }
-        }
-        as.unreachable("Unexpected case {} {}", ID, params);
-        return "";
-    }
-
-    public LLVMValueRef getOrCreateIntrinsic(IntrinsicID ID, Object... params) {
-        String intrinsicName = getIntrinsicName(ID, params);
-        LLVMValueRef intrinsic = LLVM.LLVMGetNamedFunction(module, intrinsicName);
-        if (intrinsic != null) {
-            return intrinsic;
-        }
-        switch (ID) {
-            case JELLYFISH_LENGTH: {
-                // i32 jellyfish.length(i32* arrayPtr)
-                LLVMTypeRef jellyfishNewTy = buildFunctionType(
-                        buildIntType(32),
-                        List.of(buildPointerType(buildIntType(32)))
-                );
-                LLVMValueRef ret = this.addFunction(jellyfishNewTy, intrinsicName);
-                return ret;
-            }
-            case JELLYFISH_NEWARRAY: {
-                // i32* jellyfish.new(i32 baseSize, i32... lengths)
-                List<LLVMTypeRef> paramTypes = new ArrayList<>();
-                paramTypes.add(buildIntType(32));
-                Integer dimension = (Integer) params[0];
-                for (int d = 0; d < dimension; d++) {
-                    paramTypes.add(buildIntType(32));
-                }
-                LLVMTypeRef jellyfishLengthTy = buildFunctionType(
-                        buildIntType(32),
-                        paramTypes
-                );
-                LLVMValueRef ret = this.addFunction(jellyfishLengthTy, intrinsicName);
-                return ret;
-            }
-            case JELLYFISH_MONITOR_ENTER: {
-                // i32* jellyfish.monitorenter.[unique id](%java.lang.Object* val)
-            }
-            case JELLYFISH_MONITOR_EXIT: {
-                // i32* jellyfish.monitorexit.[unique id](%java.lang.Object* val)
-                LLVMTypeRef objType = (LLVMTypeRef) params[0];
-
-                LLVMTypeRef jellyfishMonitorTy = buildFunctionType(
-                        buildVoidType(),
-                        List.of(objType)
-                );
-                LLVMValueRef ret = this.addFunction(jellyfishMonitorTy, intrinsicName);
-                return ret;
-            }
-            case JELLYFISH_INSTANCEOF: {
-                // i32* jellyfish.instanceof.[unique id](%java.lang.Object* val, [Type corresponding to specific Class] checkedType)
-                LLVMTypeRef checkType = (LLVMTypeRef) params[1];
-                LLVMTypeRef objectType = (LLVMTypeRef) params[2];
-
-                LLVMTypeRef jellyfishInstanceOfTy = buildFunctionType(
-                        buildIntType(1),
-                        List.of(
-                                objectType,
-                                checkType
-                        )
-                );
-                LLVMValueRef ret = this.addFunction(jellyfishInstanceOfTy, intrinsicName);
-                return ret;
-            }
-        }
-        as.unreachable("Unexpected case: {} {}", ID, params);
-        return null;
-    }
-
-
     /*
      * Module manipulation operations
      * 1. Add IR elements into the module.
@@ -572,28 +483,6 @@ public class LLVMCodeGen {
         return null;
     }
 
-    public Pair<LLVMValueRef, LLVMValueRef> unifyValues(Optional<LLVMValueRef> val1, Optional<LLVMValueRef> val2, LLVMTypeRef defaultType) {
-        as.assertTrue(defaultType != null, "There should be a defaultType in case both val1 & val2 are nulls");
-        if (val1.isPresent() && val2.isPresent()) {
-            return new Pair<>(val1.get(), val2.get());
-        } else if (val1.isEmpty() && val2.isEmpty()) {
-            LLVMValueRef nullVal1 = buildNull(defaultType);
-            LLVMValueRef nullVal2 = buildNull(defaultType);
-            return new Pair<>(nullVal1, nullVal2);
-        } else if (val1.isEmpty()) {
-            LLVMTypeRef valType2 = getValueType(val2.get());
-            LLVMValueRef nullVal1 = buildNull(valType2);
-            return new Pair<>(nullVal1, val2.get());
-        } else if (val2.isEmpty()) {
-            LLVMTypeRef valType1 = getValueType(val1.get());
-            LLVMValueRef nullVal2 = buildNull(valType1);
-            return new Pair<>(val1.get(), nullVal2);
-        } else {
-            as.unreachable("Unreachable");
-            return null;
-        }
-    }
-
     public LLVMValueRef buildNop() {
         // TODO: change it to intrisic.
         return LLVM.LLVMConstNull(LLVM.LLVMInt1Type());
@@ -635,6 +524,94 @@ public class LLVMCodeGen {
     /*
      * Intrinsic builders
      */
+
+    public static String getIntrinsicName(IntrinsicID ID, Object... params) {
+        switch (ID) {
+            case JELLYFISH_LENGTH: {
+                return String.format("%s", ID.getName());
+            }
+            case JELLYFISH_NEWARRAY: {
+                Integer dimension = (Integer) params[0];
+                return String.format("%s.%d", ID.getName(), dimension);
+            }
+            case JELLYFISH_MONITOR_ENTER: {
+            }
+            case JELLYFISH_MONITOR_EXIT: {
+                return String.format("%s", ID.getName());
+            }
+            case JELLYFISH_INSTANCEOF: {
+                String typeStr = (String) params[0];
+                return String.format("%s.%s", ID.getName(), typeStr);
+            }
+        }
+        as.unreachable("Unexpected case {} {}", ID, params);
+        return "";
+    }
+
+    public LLVMValueRef getOrCreateIntrinsic(IntrinsicID ID, Object... params) {
+        String intrinsicName = getIntrinsicName(ID, params);
+        LLVMValueRef intrinsic = LLVM.LLVMGetNamedFunction(module, intrinsicName);
+        if (intrinsic != null) {
+            return intrinsic;
+        }
+        switch (ID) {
+            case JELLYFISH_LENGTH: {
+                // i32 jellyfish.length(i32* arrayPtr)
+                LLVMTypeRef jellyfishNewTy = buildFunctionType(
+                        buildIntType(32),
+                        List.of(buildPointerType(buildIntType(32)))
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishNewTy, intrinsicName);
+                return ret;
+            }
+            case JELLYFISH_NEWARRAY: {
+                // i32* jellyfish.new(i32 baseSize, i32... lengths)
+                List<LLVMTypeRef> paramTypes = new ArrayList<>();
+                paramTypes.add(buildIntType(32));
+                Integer dimension = (Integer) params[0];
+                for (int d = 0; d < dimension; d++) {
+                    paramTypes.add(buildIntType(32));
+                }
+                LLVMTypeRef jellyfishLengthTy = buildFunctionType(
+                        buildIntType(32),
+                        paramTypes
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishLengthTy, intrinsicName);
+                return ret;
+            }
+            case JELLYFISH_MONITOR_ENTER: {
+                // i32* jellyfish.monitorenter.[unique id](%java.lang.Object* val)
+            }
+            case JELLYFISH_MONITOR_EXIT: {
+                // i32* jellyfish.monitorexit.[unique id](%java.lang.Object* val)
+                LLVMTypeRef objType = (LLVMTypeRef) params[0];
+
+                LLVMTypeRef jellyfishMonitorTy = buildFunctionType(
+                        buildVoidType(),
+                        List.of(objType)
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishMonitorTy, intrinsicName);
+                return ret;
+            }
+            case JELLYFISH_INSTANCEOF: {
+                // i32* jellyfish.instanceof.[unique id](%java.lang.Object* val, [Type corresponding to specific Class] checkedType)
+                LLVMTypeRef checkType = (LLVMTypeRef) params[1];
+                LLVMTypeRef objectType = (LLVMTypeRef) params[2];
+
+                LLVMTypeRef jellyfishInstanceOfTy = buildFunctionType(
+                        buildIntType(1),
+                        List.of(
+                                objectType,
+                                checkType
+                        )
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishInstanceOfTy, intrinsicName);
+                return ret;
+            }
+        }
+        as.unreachable("Unexpected case: {} {}", ID, params);
+        return null;
+    }
 
     public LLVMValueRef buildMalloc(LLVMTypeRef type) {
         // TODO: maybe replace malloc with a special intrinsic "new".
@@ -704,6 +681,31 @@ public class LLVMCodeGen {
                 List.of(buildTypeCast(obj, objectType), buildNull(checkType))
         );
         return instanceOf;
+    }
+
+    /*
+     * Value Manipulations
+     */
+    public Pair<LLVMValueRef, LLVMValueRef> unifyValues(Optional<LLVMValueRef> val1, Optional<LLVMValueRef> val2, LLVMTypeRef defaultType) {
+        as.assertTrue(defaultType != null, "There should be a defaultType in case both val1 & val2 are nulls");
+        if (val1.isPresent() && val2.isPresent()) {
+            return new Pair<>(val1.get(), val2.get());
+        } else if (val1.isEmpty() && val2.isEmpty()) {
+            LLVMValueRef nullVal1 = buildNull(defaultType);
+            LLVMValueRef nullVal2 = buildNull(defaultType);
+            return new Pair<>(nullVal1, nullVal2);
+        } else if (val1.isEmpty()) {
+            LLVMTypeRef valType2 = getValueType(val2.get());
+            LLVMValueRef nullVal1 = buildNull(valType2);
+            return new Pair<>(nullVal1, val2.get());
+        } else if (val2.isEmpty()) {
+            LLVMTypeRef valType1 = getValueType(val1.get());
+            LLVMValueRef nullVal2 = buildNull(valType1);
+            return new Pair<>(val1.get(), nullVal2);
+        } else {
+            as.unreachable("Unreachable");
+            return null;
+        }
     }
 
 
