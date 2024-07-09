@@ -282,19 +282,18 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         } else if (jType instanceof ReferenceType) {
             if (jType instanceof ArrayType) {
+                // A[][] => *[*[i32 * 0] * 0]
                 Type jBaseType = ((ArrayType) jType).baseType();
                 int dimension = ((ArrayType) jType).dimensions();
 
                 LLVMTypeRef baseType = this.tranType(jBaseType);
                 int arraySize = 0; // in java, array sizes are unknown.
 
-                LLVMTypeRef curArrayType = codeGen.buildArrayType(baseType, arraySize);
+                LLVMTypeRef curArrayPtrType = codeGen.buildPointerType(codeGen.buildArrayType(baseType, arraySize));
                 for (int d = 1; d < dimension; d++) {
-                    curArrayType = codeGen.buildArrayType(curArrayType, arraySize);
+                    curArrayPtrType = codeGen.buildPointerType(codeGen.buildArrayType(curArrayPtrType, arraySize));
                 }
-                LLVMTypeRef llvmArray = curArrayType;
-                LLVMTypeRef llvmArrayPtr = codeGen.buildPointerType(llvmArray);
-                return llvmArrayPtr;
+                return curArrayPtrType;
             } else if (jType instanceof ClassType) {
                 JClass jclass = ((ClassType) jType).getJClass();
                 LLVMTypeRef llvmStruct = getOrTranClass(jclass);
@@ -845,6 +844,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                         LLVMValueRef call = codeGen.buildCall(llvmCallee, args);
                         return call;
                     } else {
+                        // TODO: unknown calling target
                         as.unimplemented();
                         return null;
                     }
@@ -867,10 +867,30 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 return llvmVal;
             }
         } else if (jexp instanceof ArrayAccess) {
-            // DOING:
+            /*
+             * T-R-ARRAY:
+             *   A::T1,  T1 = T2[], T2 => F2
+             *        A[n] =R> B
+             *  -------------------------
+             *    T1 => F1, F1 = *(F2[])
+             *    A =R> B1    B1::F1
+             * ----------------------------
+             *          B :: F2
+             */
+
             Var baseVar = ((ArrayAccess) jexp).getBase();
             Var indexVar = ((ArrayAccess) jexp).getIndex();
 
+            Type jelementType = ((ArrayType) baseVar.getType()).elementType();   // :: T2
+            LLVMTypeRef elementType = tranType(jelementType);   // ::F2
+
+            LLVMValueRef base = tranRValue(baseVar, codeGen.buildPointerType(codeGen.buildArrayType(elementType, 0)), true);     // ::F1
+
+            LLVMValueRef index1 = codeGen.buildConstInt(codeGen.buildIntType(64), 0);
+            LLVMValueRef index2 = tranRValue(indexVar, codeGen.buildIntType(64), true);
+            LLVMValueRef gep = codeGen.buildGEP(base, List.of(index1, index2));
+            LLVMValueRef load = codeGen.buildLoad(gep, StringUtil.getVarNameAsLoad(baseVar));
+            return load;
 
         } else if (jexp instanceof CastExp) {
             // TODO:
@@ -905,7 +925,30 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMValueRef ptr = opVarPtr.get();
             return ptr;
         } else if (jexp instanceof ArrayAccess) {
-            // DOING:
+            /*
+             * T-L-ARRAY:
+             *   A::T1,  T1 = T2[], T2 => F2
+             *        A[n] =R> B
+             *  -------------------------
+             *    T1 => F1, F1 = *(F2[])
+             *    A =R> B1    B1::F1
+             * ----------------------------
+             *          B :: *F2
+             */
+
+            Var baseVar = ((ArrayAccess) jexp).getBase();
+            Var indexVar = ((ArrayAccess) jexp).getIndex();
+
+            Type jelementType = ((ArrayType) baseVar.getType()).elementType();   // :: T2
+            LLVMTypeRef elementType = tranType(jelementType);   // ::F2
+
+            LLVMValueRef base = tranRValue(baseVar, codeGen.buildPointerType(codeGen.buildArrayType(elementType, 0)), true);   // ::F1
+
+            LLVMValueRef index1 = codeGen.buildConstInt(codeGen.buildIntType(64), 0);
+            LLVMValueRef index2 = tranRValue(indexVar, codeGen.buildIntType(64), true);
+            List<LLVMValueRef> indices = List.of(index1, index2);
+            LLVMValueRef gep = codeGen.buildGEP(base, indices);
+            return gep;
         }
         as.unimplemented();
         return null;

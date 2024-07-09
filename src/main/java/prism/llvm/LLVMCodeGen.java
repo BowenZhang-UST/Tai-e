@@ -251,6 +251,16 @@ public class LLVMCodeGen {
         }
     }
 
+
+    public LLVMValueRef buildGEP(LLVMValueRef base, List<LLVMValueRef> indices) {
+        ArrayBuilder<LLVMValueRef> indiceArray = new ArrayBuilder<>();
+        for (LLVMValueRef indice : indices) {
+            indiceArray.add(indice);
+        }
+
+        return LLVM.LLVMBuildGEP(builder, base, indiceArray.build(), indiceArray.length(), "gep");
+    }
+
     public LLVMValueRef buildBinaryOp(String op, LLVMValueRef left, LLVMValueRef right, LLVMTypeRef resType) {
         LLVMTypeRef lType = getValueType(left);
         LLVMTypeRef rType = getValueType(right);
@@ -525,7 +535,6 @@ public class LLVMCodeGen {
             as.unreachable("Unreachable");
             return null;
         }
-
     }
 
     public LLVMValueRef buildNop() {
