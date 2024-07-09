@@ -18,6 +18,7 @@ import pascal.taie.language.classes.*;
 import pascal.taie.language.type.*;
 
 
+import java.lang.reflect.Method;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -332,6 +333,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public void tranMethodBody(JMethod jmethod) {
+        // TODO: enable all methods
         if (!jmethod.getDeclaringClass().isApplication()) {
             // Debug use: Skip non application class
             return;
@@ -846,14 +848,30 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         } else if (jexp instanceof InvokeExp) { // Abstract
             if (jexp instanceof InvokeStatic) {
-                // TODO:
+                MethodRef methodRef = ((InvokeStatic) jexp).getMethodRef();
+                JMethod jcallee = methodRef.resolveNullable();
+                as.assertTrue(jcallee != null, "Invokestatic must can be resolved.");
+                LLVMValueRef callee = getOrTranMethod(jcallee);
+                as.assertTrue(LLVM.LLVMCountParams(callee) == ((InvokeStatic) jexp).getArgCount(),
+                        "Argument number doesn't match. LLVM func: {}, static invoke: {}", getLLVMStr(callee), jexp);
+                List<LLVMValueRef> args = new ArrayList<>();
+
+                List<Var> jargs = ((InvokeStatic) jexp).getArgs();
+                for (int i = 0; i < jargs.size(); i++) {
+                    LLVMValueRef llvmIthParam = LLVM.LLVMGetParam(callee, i);
+                    Var jarg = jargs.get(i);
+                    LLVMValueRef llvmArg = tranRValue(jarg, getValueType(llvmIthParam), true);
+                    args.add(llvmArg);
+                }
+                LLVMValueRef call = codeGen.buildCall(callee, args);
+                return call;
             } else if (jexp instanceof InvokeDynamic) {
                 // TODO:
             } else if (jexp instanceof InvokeInstanceExp) { // Abstract
                 Var thisVar = ((InvokeInstanceExp) jexp).getBase();
                 MethodRef methodRef = ((InvokeInstanceExp) jexp).getMethodRef();
-                JMethod callee = methodRef.resolveNullable();
-                if (callee != null) {
+                JMethod jcallee = methodRef.resolveNullable();
+                if (jcallee != null) {
                     /*
                      * T-Invoke Instance:
                      *     F(B1, B2...)
@@ -861,23 +879,23 @@ public class JellyFish extends ProgramAnalysis<Void> {
                      * ---------------------------
                      *     T3 = T1   T4 = T2
                      */
-                    LLVMValueRef llvmCallee = getOrTranMethod(callee);
-                    as.assertTrue(LLVM.LLVMCountParams(llvmCallee) == ((InvokeInstanceExp) jexp).getArgCount() + 1,
-                            "Argument number doesn't match. LLVM func: {}, java invoke: {}", getLLVMStr(llvmCallee), jexp);
+                    LLVMValueRef callee = getOrTranMethod(jcallee);
+                    as.assertTrue(LLVM.LLVMCountParams(callee) == ((InvokeInstanceExp) jexp).getArgCount() + 1,
+                            "Argument number doesn't match. LLVM func: {}, instance invoke: {}", getLLVMStr(callee), jexp);
 
-                    LLVMValueRef llvm0thParam = LLVM.LLVMGetParam(llvmCallee, 0);
+                    LLVMValueRef llvm0thParam = LLVM.LLVMGetParam(callee, 0);
                     LLVMValueRef llvmThis = tranRValue(thisVar, getValueType(llvm0thParam), true);
                     List<LLVMValueRef> args = new ArrayList<>();
                     args.add(llvmThis);
 
                     List<Var> jargs = ((InvokeInstanceExp) jexp).getArgs();
                     for (int i = 1; i < jargs.size() + 1; i++) {
-                        LLVMValueRef llvmIthParam = LLVM.LLVMGetParam(llvmCallee, i);
+                        LLVMValueRef llvmIthParam = LLVM.LLVMGetParam(callee, i);
                         Var jarg = jargs.get(i - 1);
                         LLVMValueRef llvmArg = tranRValue(jarg, getValueType(llvmIthParam), true);
                         args.add(llvmArg);
                     }
-                    LLVMValueRef call = codeGen.buildCall(llvmCallee, args);
+                    LLVMValueRef call = codeGen.buildCall(callee, args);
                     return call;
                 } else {
                     // TODO: unknown call target
