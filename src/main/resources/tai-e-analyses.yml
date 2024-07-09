@@ -164,3 +164,4 @@
 - description: Jellyfish transpiler
   analysisClass: prism.jellyfish.JellyFish
   id: jelly-fish
+  requires: [ cfg ]

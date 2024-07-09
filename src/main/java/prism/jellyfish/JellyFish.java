@@ -4,6 +4,8 @@ package prism.jellyfish;
 import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
 import pascal.taie.World;
 import pascal.taie.analysis.ProgramAnalysis;
+import pascal.taie.analysis.graph.cfg.CFG;
+import pascal.taie.analysis.graph.cfg.CFGBuilder;
 import pascal.taie.ir.IR;
 import pascal.taie.ir.exp.*;
 import pascal.taie.ir.stmt.*;
@@ -358,6 +360,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
             boolean ret = maps.setVarMap(var, alloca);
             as.assertTrue(ret, "The var {} has been duplicate translated.", var);
         }
+
+        CFG<Stmt> cfg = ir.getResult(CFGBuilder.ID);
 
         List<Stmt> jstmts = ir.getStmts();
         for (Stmt jstmt : jstmts) {
