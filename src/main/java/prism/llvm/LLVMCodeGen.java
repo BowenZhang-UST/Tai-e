@@ -261,6 +261,20 @@ public class LLVMCodeGen {
         return LLVM.LLVMBuildGEP(builder, base, indiceArray.build(), indiceArray.length(), "gep");
     }
 
+    public LLVMValueRef buildNeg(LLVMValueRef val) {
+        LLVMTypeRef type = getValueType(val);
+        int kind = LLVM.LLVMGetTypeKind(type);
+        if (kind == LLVM.LLVMIntegerTypeKind) {
+            return LLVM.LLVMBuildNeg(builder, val, "neg");
+        } else if (kind == LLVM.LLVMFloatTypeKind || kind == LLVM.LLVMDoubleTypeKind) {
+            return LLVM.LLVMBuildFNeg(builder, val, "fneg");
+        } else {
+            as.unreachable("Unexpected type: {}", getLLVMStr(type));
+            return null;
+        }
+
+    }
+
     public LLVMValueRef buildBinaryOp(String op, LLVMValueRef left, LLVMValueRef right, LLVMTypeRef resType) {
         LLVMTypeRef lType = getValueType(left);
         LLVMTypeRef rType = getValueType(right);

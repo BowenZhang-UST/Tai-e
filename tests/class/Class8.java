@@ -9,15 +9,18 @@ public class Class8 {
     static int f7;
     static int f8;
     static int f9;
-    static boolean f10;
-    static boolean f11;
-    static boolean f12;
-    static boolean f13;
-    static boolean f14;
-    static boolean f15;
-    static int f16;
-    static int f17;
-    static int f18;
+    static int f10;
+    static int f11;
+    static int f12;
+    static int f13;
+
+    static double f20;
+    static double f21;
+    static double f22;
+    static double f23;
+    static double f24;
+    static double f25;
+    static double f26;
 
 
     static {
@@ -34,9 +37,20 @@ public class Class8 {
         f9 = f1 ^ 119;
         // condition
         // shift
-        f16 = f1 << 126;
-        f17 = f1 >> 127;
-        f18 = f1 >>> 128;
+        f10 = f1 << 126;
+        f11 = f1 >> 127;
+        f12 = f1 >>> 128;
+
+        // neg
+        f13 = -f1;
+
+        f20 = 1.0;
+        f21 = f20 + 1.0;
+        f22 = f20 * 1.0;
+        f23 = f20 / 1.0;
+        f24 = f20 % 1.0;
+        f25 = -f20;
+
     }
 
     public static void main(String[] args) {

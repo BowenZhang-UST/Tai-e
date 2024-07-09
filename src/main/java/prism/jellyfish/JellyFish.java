@@ -282,7 +282,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         } else if (jType instanceof ReferenceType) {
             if (jType instanceof ArrayType) {
-                // A[][] => *[*[i32 * 0] * 0]
+                // Example: A[][] => *[*[i32 * 0] * 0]
                 Type jBaseType = ((ArrayType) jType).baseType();
                 int dimension = ((ArrayType) jType).dimensions();
 
@@ -597,7 +597,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMValueRef llvmArrayPtr = tranRValue(arrayVar, codeGen.buildPointerType(codeGen.buildIntType(32)), true);
                 return codeGen.buildLength(llvmArrayPtr);
             } else if (jexp instanceof NegExp) {
-                // TODO:
+                Var var = ((NegExp) jexp).getValue();
+                LLVMValueRef llvmVar = tranRValue(var).get();
+                LLVMValueRef negVar = codeGen.buildNeg(llvmVar);
+                return negVar;
             }
         } else if (jexp instanceof BinaryExp) { // Interface
             Type jresType = jexp.getType();
