@@ -23,7 +23,8 @@ export PATH="$JAVA_HOME/path/to/bin:$PATH"
     ./gradlew compileJava
     ```
 
-- Production build (takes minutes). It generates an all-in-one jar application in `build` dir. It is the complete Tai-e jar file.
+- Production build (takes minutes). It generates an all-in-one jar application in `build` dir. It is
+  the complete Tai-e jar file.
 
     ```shell
     ./gradlew fatJar
@@ -47,9 +48,27 @@ Run JellyFish as a pass in Tai-e.
     ```shell
     java -jar build/[tai-e far file] -a jelly-fish -cp tests/class -m Class1
     ```
+
 The last command line would generate an LLVM 12 bitcode `out.bc` at current dir. You can
 use `llvm-dis` to get the readable ir file.
 
 ```shell
 llvm-dis out.bc
 ```
+
+## TODOs
+
+We need to perform some optimizations and analyses to improve the quality of the generated LLVM IR:
+
+**Optimizations**
+
+1. Mem2Reg: Because of the `Var` in Tai-e, we have created many redundant load-store pairs through
+   the vars.
+2. Simplify CFG. Currently, each Tai-e statement correponds to a block. We need to do some merge.
+3. Virtual call & field access resolution. We need to convert them to the style of function pointers
+   such that the downstream pointer and call-graph analysis can understand them well.
+
+**Analyses**
+
+1. OO information resolution.
+2. Debug information resolution.
