@@ -6,6 +6,7 @@ import pascal.taie.World;
 import pascal.taie.analysis.ProgramAnalysis;
 import pascal.taie.analysis.graph.cfg.CFG;
 import pascal.taie.analysis.graph.cfg.CFGBuilder;
+import pascal.taie.analysis.graph.cfg.CFGEdge;
 import pascal.taie.ir.IR;
 import pascal.taie.ir.exp.*;
 import pascal.taie.ir.stmt.*;
@@ -345,11 +346,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
         as.assertTrue(opllvmFunc.isPresent(), "The decl of jmethod {} should have be translated", jmethod);
         LLVMValueRef llvmFunc = opllvmFunc.get();
 
-        // TODO: only one basic block.
-        LLVMBasicBlockRef block = codeGen.addBasicBlock(llvmFunc, "");
-        codeGen.setInsertBlock(block);
-
         IR ir = jmethod.getIR();
+        CFG<Stmt> cfg = ir.getResult(CFGBuilder.ID);
+
+        // We create an entry block contains all Tai-e variables
+        LLVMBasicBlockRef entryBlock = codeGen.addBasicBlock(llvmFunc, "entry");
+        codeGen.setInsertBlock(entryBlock);
         List<Var> vars = ir.getVars();
         for (Var var : vars) {
             Type jvarType = var.getType();
@@ -361,21 +363,79 @@ public class JellyFish extends ProgramAnalysis<Void> {
             as.assertTrue(ret, "The var {} has been duplicate translated.", var);
         }
 
-        CFG<Stmt> cfg = ir.getResult(CFGBuilder.ID);
+        // We allocate an exit block for the exit stmt in CFG, which is added by Tai-e.
+        Stmt exitStmt = cfg.getExit();
+        LLVMBasicBlockRef exitBB = codeGen.addBasicBlock(llvmFunc, "exit");
+        maps.setStmtBlockMap(exitStmt, exitBB);
+        codeGen.setInsertBlock(exitBB);
+        codeGen.buildUnreachable();
 
+        // Each of the normal blocks contains exactly ONE Tai-e statement
         List<Stmt> jstmts = ir.getStmts();
         for (Stmt jstmt : jstmts) {
-            logger.info("**Stmt: {}", jstmt);
-            List<LLVMValueRef> llvmInsts = this.tranStmt(jstmt, jmethod);
+            LLVMBasicBlockRef bb = codeGen.addBasicBlock(llvmFunc, "bb");
+            maps.setStmtBlockMap(jstmt, bb);
+        }
+
+        // The edges related to control flow stmts will be constructed.
+        for (Stmt jstmt : jstmts) {
+            LLVMBasicBlockRef bb = maps.getStmtBlockMap(jstmt).get();
+            codeGen.setInsertBlock(bb);
+            List<LLVMValueRef> llvmInsts = this.tranStmt(jstmt, jmethod, cfg);
+
             List<String> llvmInstStrs = llvmInsts.stream().map(inst -> getLLVMStr(inst)).toList();
             for (String str : llvmInstStrs) logger.info("  => {}", str);
         }
+
+        // Handle the normal basic blocks without a terminator instructions
+        for (Stmt jstmt : jstmts) {
+            LLVMBasicBlockRef bb = maps.getStmtBlockMap(jstmt).get();
+            LLVMValueRef lastInst = LLVM.LLVMGetLastInstruction(bb);
+            if (LLVM.LLVMIsATerminatorInst(lastInst) != null) {
+                continue;
+            }
+            Set<CFGEdge<Stmt>> outEdges = cfg.getOutEdgesOf(jstmt);
+            for (CFGEdge<Stmt> outEdge : outEdges) {
+                CFGEdge.Kind outKind = outEdge.getKind();
+                if (outKind == CFGEdge.Kind.FALL_THROUGH) {
+                    codeGen.setInsertBlock(bb);
+                    Stmt target = outEdge.target();
+                    LLVMBasicBlockRef fallthrough = maps.getStmtBlockMap(target).get();
+                    codeGen.buildUncondBr(fallthrough);
+                } else if (outKind == CFGEdge.Kind.CAUGHT_EXCEPTION) {
+                    codeGen.setInsertBlock(bb);
+                    Stmt target = outEdge.target();
+                    LLVMBasicBlockRef handler = maps.getStmtBlockMap(target).get();
+                    codeGen.buildUncondBr(handler);
+                } else if (outKind == CFGEdge.Kind.UNCAUGHT_EXCEPTION) {
+                    codeGen.buildUncondBr(exitBB);
+                } else {
+                    as.unreachable("The other kinds are unexpected. edge: {}. Last Inst: {}", outEdge, getLLVMStr(lastInst));
+                }
+            }
+        }
+
+        // connect the entry to the real entry stmt
+        codeGen.setInsertBlock(entryBlock);
+        Stmt cfgEntry = cfg.getEntry();
+        as.assertTrue(cfgEntry instanceof Nop, "It's not real entry.");
+        Set<CFGEdge<Stmt>> entryOuts = cfg.getOutEdgesOf(cfgEntry);
+        as.assertTrue(entryOuts.size() == 1, "Only one out edge.");
+        CFGEdge<Stmt> entryOut = (CFGEdge<Stmt>) entryOuts.toArray()[0];
+        as.assertTrue(entryOut.getKind() == CFGEdge.Kind.ENTRY, "Entry kind");
+        Stmt entryStmt = entryOut.target();
+        if (!(entryStmt instanceof Nop)) {
+            LLVMBasicBlockRef stmtEntryBlock = maps.getStmtBlockMap(entryStmt).get();
+            codeGen.buildUncondBr(stmtEntryBlock);
+        }
+
         maps.clearVarMap();
+        maps.clearStmtBlockMap();
 
     }
 
     @Nullable
-    public List<LLVMValueRef> tranStmt(Stmt jstmt, JMethod jmethod) {
+    public List<LLVMValueRef> tranStmt(Stmt jstmt, JMethod jmethod, CFG<Stmt> cfg) {
         List<LLVMValueRef> resInsts = new ArrayList<>();
 
         if (jstmt instanceof DefinitionStmt) { // Abstract
@@ -454,15 +514,65 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         } else if (jstmt instanceof JumpStmt) { // Abstract
             if (jstmt instanceof SwitchStmt) { // Abstract
-                if (jstmt instanceof LookupSwitch) {
-                    // TODO:
-                } else if (jstmt instanceof TableSwitch) {
-                    // TODO:
+                // Uniformly handle LookupSwitch and TableSwitch
+                Var var = ((SwitchStmt) jstmt).getVar();
+                LLVMValueRef cond = tranRValue(var, codeGen.buildIntType(64));
+                LLVMTypeRef condType = getValueType(cond);
+                as.assertTrue(LLVM.LLVMGetTypeKind(condType) == LLVM.LLVMIntegerTypeKind, "The condType should be an integer. Got: {}", getLLVMStr(condType));
+
+                List<Pair<Integer, Stmt>> caseTargets = ((SwitchStmt) jstmt).getCaseTargets();
+                List<Pair<LLVMValueRef, LLVMBasicBlockRef>> llvmCaseTargets = new ArrayList<>();
+
+                for (Pair<Integer, Stmt> caseTarget : caseTargets) {
+                    Integer caseValue = caseTarget.first();
+                    Stmt target = caseTarget.second();
+
+                    LLVMValueRef llvmCase = codeGen.buildConstInt(condType, caseValue.longValue());
+                    LLVMBasicBlockRef llvmBlock = maps.getStmtBlockMap(target).get();
+                    llvmCaseTargets.add(new Pair(llvmCase, llvmBlock));
                 }
+                Stmt defaultStmt = ((SwitchStmt) jstmt).getDefaultTarget();
+                LLVMBasicBlockRef defaultBlock = maps.getStmtBlockMap(defaultStmt).get();
+                as.assertTrue(defaultBlock != null, "The default block should not be null");
+                LLVMValueRef switchInst = codeGen.buildSwitch(cond, llvmCaseTargets, defaultBlock);
+                as.assertTrue(switchInst != null, "It should not be null.");
+                resInsts.add(switchInst);
+                return resInsts;
             } else if (jstmt instanceof Goto) {
-                // TODO:
+                Stmt targetStmt = ((Goto) jstmt).getTarget();
+                LLVMBasicBlockRef targetBlock = maps.getStmtBlockMap(targetStmt).get();
+                LLVMValueRef br = codeGen.buildUncondBr(targetBlock);
+                as.assertTrue(br != null, "There should be a value");
+                resInsts.add(br);
+                return resInsts;
             } else if (jstmt instanceof If) {
-                // TODO:
+                Set<CFGEdge<Stmt>> outEdges = cfg.getOutEdgesOf(jstmt);
+                Stmt trueTarget = null;
+                Stmt falseTarget = null;
+                for (CFGEdge<Stmt> outEdge : outEdges) {
+                    CFGEdge.Kind kind = outEdge.getKind();
+                    if (kind == CFGEdge.Kind.IF_TRUE) {
+                        as.assertTrue(trueTarget == null, "Only one true target.");
+                        trueTarget = outEdge.target();
+                        continue;
+                    } else if (kind == CFGEdge.Kind.IF_FALSE) {
+                        as.assertTrue(falseTarget == null, "Only one true target.");
+                        falseTarget = outEdge.target();
+                        continue;
+                    }
+                    as.unreachable("There shouldn't be other edge kind. Got: {}", outEdge);
+                }
+
+                as.assertTrue(trueTarget != null && falseTarget != null, "Both targets should be non-null. Got true: {}, false: {}", trueTarget, falseTarget);
+                LLVMBasicBlockRef trueBlock = maps.getStmtBlockMap(trueTarget).get();
+                LLVMBasicBlockRef falseBlock = maps.getStmtBlockMap(falseTarget).get();
+
+                ConditionExp cond = ((If) jstmt).getCondition();
+                LLVMValueRef condVal = tranRValue(cond, codeGen.buildIntType(1), true);
+                LLVMValueRef br = codeGen.buildCondBr(condVal, trueBlock, falseBlock);
+                as.assertTrue(br != null, "There should be a value");
+                resInsts.add(br);
+                return resInsts;
             }
         } else if (jstmt instanceof Return) {
             Var var = ((Return) jstmt).getValue();
@@ -607,16 +717,14 @@ public class JellyFish extends ProgramAnalysis<Void> {
             if (jexp instanceof StaticFieldAccess) {
                 FieldRef fieldRef = ((StaticFieldAccess) jexp).getFieldRef();
                 JField jfield = fieldRef.resolveNullable();
-                if (jfield != null) {
-                    Optional<LLVMValueRef> opfieldPtr = maps.getStaticFieldMap(jfield);
-                    as.assertTrue(opfieldPtr.isPresent(), "The field {} should have been translated.", jfield);
-                    LLVMValueRef ptr = opfieldPtr.get();
-                    LLVMValueRef load = codeGen.buildLoad(ptr, jfield.getName());
-                    return load;
-                } else {
-                    as.unreachable("The static field access {} contains null field", jexp);
-                }
+                as.assertTrue(jfield != null, "The static field access must can be handled");
+                Optional<LLVMValueRef> opfieldPtr = maps.getStaticFieldMap(jfield);
+                as.assertTrue(opfieldPtr.isPresent(), "The field {} should have been translated.", jfield);
+                LLVMValueRef ptr = opfieldPtr.get();
+                LLVMValueRef load = codeGen.buildLoad(ptr, jfield.getName());
+                return load;
             } else if (jexp instanceof InstanceFieldAccess) {
+                // TODO: instance field access
                 as.unimplemented();
                 Var baseVar = ((InstanceFieldAccess) jexp).getBase();
                 FieldRef fieldRef = ((InstanceFieldAccess) jexp).getFieldRef();

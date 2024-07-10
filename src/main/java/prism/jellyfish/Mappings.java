@@ -3,9 +3,11 @@ package prism.jellyfish;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
 import pascal.taie.ir.exp.Exp;
 import pascal.taie.ir.exp.Var;
+import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.classes.JClass;
 
 import org.bytedeco.llvm.LLVM.LLVMTypeRef;
@@ -26,6 +28,7 @@ public class Mappings {
     public HashMap<Var, LLVMValueRef> varMap;
     public HashMap<JField, LLVMValueRef> staticFieldMap;
     public HashMap<String, LLVMValueRef> stringPoolMap;
+    public HashMap<Stmt, LLVMBasicBlockRef> stmtBlockMap;
 
     public Mappings() {
         this.classMap = new HashMap<>();
@@ -33,6 +36,7 @@ public class Mappings {
         this.varMap = new HashMap<>();
         this.staticFieldMap = new HashMap<>();
         this.stringPoolMap = new HashMap<>();
+        this.stmtBlockMap = new HashMap<>();
     }
 
     private <K, V> boolean setMap(HashMap<K, V> m, K key, V value) {
@@ -127,6 +131,22 @@ public class Mappings {
 
     public Optional<LLVMValueRef> getStringPoolMap(String str) {
         return getFromMap(stringPoolMap, str);
+    }
+
+    /*
+     * Statement-block map.
+     * Cleared for each method.
+     */
+    public boolean setStmtBlockMap(Stmt stmt, LLVMBasicBlockRef block) {
+        return setMap(stmtBlockMap, stmt, block);
+    }
+
+    public Optional<LLVMBasicBlockRef> getStmtBlockMap(Stmt stmt) {
+        return getFromMap(stmtBlockMap, stmt);
+    }
+
+    public void clearStmtBlockMap() {
+        clearMap(stmtBlockMap);
     }
 
 

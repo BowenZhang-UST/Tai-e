@@ -180,6 +180,31 @@ public class LLVMCodeGen {
      * Instruction Builders
      */
 
+    public LLVMValueRef buildUnreachable() {
+        return LLVM.LLVMBuildUnreachable(builder);
+    }
+
+    public LLVMValueRef buildUncondBr(LLVMBasicBlockRef target) {
+        LLVMValueRef br = LLVM.LLVMBuildBr(builder, target);
+        return br;
+    }
+
+    public LLVMValueRef buildCondBr(LLVMValueRef cond, LLVMBasicBlockRef trueBlock, LLVMBasicBlockRef falseBlock) {
+        LLVMValueRef br = LLVM.LLVMBuildCondBr(builder, cond, trueBlock, falseBlock);
+        return br;
+    }
+
+    public LLVMValueRef buildSwitch(LLVMValueRef cond, List<Pair<LLVMValueRef, LLVMBasicBlockRef>> caseTargetPairs, LLVMBasicBlockRef defaultBlock) {
+        LLVMValueRef switchInst = LLVM.LLVMBuildSwitch(builder, cond, defaultBlock, caseTargetPairs.size());
+
+        for (Pair<LLVMValueRef, LLVMBasicBlockRef> caseTarget : caseTargetPairs) {
+            LLVMValueRef theCase = caseTarget.first();
+            LLVMBasicBlockRef theTarget = caseTarget.second();
+            LLVM.LLVMAddCase(switchInst, theCase, theTarget);
+        }
+        return switchInst;
+    }
+
     public LLVMValueRef buildAlloca(LLVMTypeRef type, String name) {
         LLVMValueRef alloca = LLVM.LLVMBuildAlloca(builder, type, name);
         return alloca;
