@@ -377,8 +377,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
             maps.setStmtBlockMap(jstmt, bb);
         }
 
-        // The edges related to control flow stmts will be constructed.
+        // Statement translation:
+        // In this process,
+        // the edges related to control flow stmts will be constructed.
         for (Stmt jstmt : jstmts) {
+            logger.info("**Stmt: {}", jstmt);
             LLVMBasicBlockRef bb = maps.getStmtBlockMap(jstmt).get();
             codeGen.setInsertBlock(bb);
             List<LLVMValueRef> llvmInsts = this.tranStmt(jstmt, jmethod, cfg);
