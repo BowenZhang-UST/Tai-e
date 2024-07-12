@@ -34,23 +34,6 @@ public class LLVMCodeGen {
     private static final Logger logger = LogManager.getLogger(LLVMCodeGen.class);
     private static final AssertUtil as = new AssertUtil(logger);
 
-    public enum IntrinsicID {
-        JELLYFISH_NEWARRAY("jellyfish.newarray"),
-        JELLYFISH_LENGTH("jellyfish.length"),
-        JELLYFISH_MONITOR_ENTER("jellyfish.monitor.enter"),
-        JELLYFISH_MONITOR_EXIT("jellyfish.monitor.exit"),
-        JELLYFISH_INSTANCEOF("jellyfish.instanceof");
-        private final String name;
-
-        IntrinsicID(String name) {
-            this.name = name;
-        }
-
-        public String getName() {
-            return name;
-        }
-    }
-
     public LLVMCodeGen() {
         this.moduleName = "module";
         this.bcFile = "out.bc";
@@ -550,6 +533,24 @@ public class LLVMCodeGen {
      * Intrinsic builders
      */
 
+    public enum IntrinsicID {
+        JELLYFISH_NEWARRAY("jellyfish.newarray"),
+        JELLYFISH_LENGTH("jellyfish.length"),
+        JELLYFISH_MONITOR_ENTER("jellyfish.monitor.enter"),
+        JELLYFISH_MONITOR_EXIT("jellyfish.monitor.exit"),
+        JELLYFISH_INSTANCEOF("jellyfish.instanceof"),
+        JELLYFISH_CLASS("jellyfish.class");
+        private final String name;
+
+        IntrinsicID(String name) {
+            this.name = name;
+        }
+
+        public String getName() {
+            return name;
+        }
+    }
+
     public static String getIntrinsicName(IntrinsicID ID, Object... params) {
         switch (ID) {
             case JELLYFISH_LENGTH: {
@@ -565,6 +566,10 @@ public class LLVMCodeGen {
                 return String.format("%s", ID.getName());
             }
             case JELLYFISH_INSTANCEOF: {
+                String typeStr = (String) params[0];
+                return String.format("%s.%s", ID.getName(), typeStr);
+            }
+            case JELLYFISH_CLASS: {
                 String typeStr = (String) params[0];
                 return String.format("%s.%s", ID.getName(), typeStr);
             }
@@ -631,6 +636,20 @@ public class LLVMCodeGen {
                         )
                 );
                 LLVMValueRef ret = this.addFunction(jellyfishInstanceOfTy, intrinsicName);
+                return ret;
+            }
+            case JELLYFISH_CLASS: {
+                // %java.lang.Class* jellyfish.class.[unique id]([Type corresponding to specific Class] val)
+                LLVMTypeRef classType = (LLVMTypeRef) params[1];
+                LLVMTypeRef javaClassType = (LLVMTypeRef) params[2];
+
+                LLVMTypeRef jellyFishCLassTy = buildFunctionType(
+                        javaClassType,
+                        List.of(
+                                classType
+                        )
+                );
+                LLVMValueRef ret = this.addFunction(jellyFishCLassTy, intrinsicName);
                 return ret;
             }
         }
@@ -706,6 +725,17 @@ public class LLVMCodeGen {
                 List.of(buildTypeCast(obj, objectType), buildNull(checkType))
         );
         return instanceOf;
+    }
+
+    public LLVMValueRef buildClassIntrinsic(LLVMTypeRef classType, LLVMTypeRef javaClassType) {
+        String typeStrAscii = StringUtil.getAscii(getLLVMStr(classType));
+
+        LLVMValueRef jellyfishClass = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_CLASS, typeStrAscii, classType, javaClassType);
+        LLVMValueRef classIntrinsic = buildCall(
+                jellyfishClass,
+                List.of(buildNull(classType))
+        );
+        return classIntrinsic;
     }
 
     /*

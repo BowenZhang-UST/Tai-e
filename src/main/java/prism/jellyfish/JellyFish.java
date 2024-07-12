@@ -709,7 +709,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     LLVMValueRef llvmStrVal = getOrTranStringLiteral(str);
                     return llvmStrVal;
                 } else if (jexp instanceof ClassLiteral) {
-                    // TODO:
+                    JClass classClass = world.getClassHierarchy().getClass("java.lang.Class");
+                    LLVMTypeRef javaClassType = tranType(classClass.getType());
+                    Type theClass = ((ClassLiteral) jexp).getTypeValue();
+                    LLVMTypeRef classType = tranType(theClass);
+                    LLVMValueRef classIntrinsic = codeGen.buildClassIntrinsic(classType, javaClassType);
+                    return classIntrinsic;
                 } else if (jexp instanceof MethodHandle) {
                     // TODO:
                 } else if (jexp instanceof MethodType) {
