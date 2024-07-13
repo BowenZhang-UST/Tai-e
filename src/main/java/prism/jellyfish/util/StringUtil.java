@@ -7,6 +7,8 @@ import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
 
+import java.util.UUID;
+
 
 public class StringUtil {
     private static final Logger logger = LogManager.getLogger(StringUtil.class);
@@ -48,6 +50,10 @@ public class StringUtil {
             res += String.valueOf(ic);
         }
         return res;
+    }
+
+    public static String getUUID() {
+        return UUID.randomUUID().toString();
     }
 
 }

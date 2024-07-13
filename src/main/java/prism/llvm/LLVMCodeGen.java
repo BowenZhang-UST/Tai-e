@@ -539,7 +539,8 @@ public class LLVMCodeGen {
         JELLYFISH_MONITOR_ENTER("jellyfish.monitor.enter"),
         JELLYFISH_MONITOR_EXIT("jellyfish.monitor.exit"),
         JELLYFISH_INSTANCEOF("jellyfish.instanceof"),
-        JELLYFISH_CLASS("jellyfish.class");
+        JELLYFISH_CLASS("jellyfish.class"),
+        JELLYFISH_METHODTYPE("jellyfish.methodtype");
         private final String name;
 
         IntrinsicID(String name) {
@@ -566,12 +567,16 @@ public class LLVMCodeGen {
                 return String.format("%s", ID.getName());
             }
             case JELLYFISH_INSTANCEOF: {
-                String typeStr = (String) params[0];
-                return String.format("%s.%s", ID.getName(), typeStr);
+                String uuid = (String) params[0];
+                return String.format("%s.%s", ID.getName(), uuid);
             }
             case JELLYFISH_CLASS: {
-                String typeStr = (String) params[0];
-                return String.format("%s.%s", ID.getName(), typeStr);
+                String uuid = (String) params[0];
+                return String.format("%s.%s", ID.getName(), uuid);
+            }
+            case JELLYFISH_METHODTYPE: {
+                String uuid = (String) params[0];
+                return String.format("%s.%s", ID.getName(), uuid);
             }
         }
         as.unreachable("Unexpected case {} {}", ID, params);
@@ -643,14 +648,27 @@ public class LLVMCodeGen {
                 LLVMTypeRef classType = (LLVMTypeRef) params[1];
                 LLVMTypeRef javaClassType = (LLVMTypeRef) params[2];
 
-                LLVMTypeRef jellyFishCLassTy = buildFunctionType(
+                LLVMTypeRef jellyFishClassTy = buildFunctionType(
                         javaClassType,
                         List.of(
                                 classType
                         )
                 );
-                LLVMValueRef ret = this.addFunction(jellyFishCLassTy, intrinsicName);
+                LLVMValueRef ret = this.addFunction(jellyFishClassTy, intrinsicName);
                 return ret;
+            }
+            case JELLYFISH_METHODTYPE: {
+                //$java.invoke.MethodType* jellyfish.class.[unique id]([A function pointer type] func)
+                LLVMTypeRef funcPtrType = (LLVMTypeRef) params[1];
+                LLVMTypeRef javaMethodTypeTy = (LLVMTypeRef) params[2];
+
+                LLVMTypeRef jellyfishMethodtypeTy = buildFunctionType(
+                        javaMethodTypeTy,
+                        List.of(funcPtrType)
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishMethodtypeTy, intrinsicName);
+                return ret;
+
             }
         }
         as.unreachable("Unexpected case: {} {}", ID, params);
@@ -717,9 +735,9 @@ public class LLVMCodeGen {
     }
 
     public LLVMValueRef buildInstanceOf(LLVMValueRef obj, LLVMTypeRef checkType, LLVMTypeRef objectType) {
-        String typeStrAscii = StringUtil.getAscii(getLLVMStr(checkType));
+        String uuid = StringUtil.getUUID();
 
-        LLVMValueRef jellyfishInstanceOf = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_INSTANCEOF, typeStrAscii, checkType, objectType);
+        LLVMValueRef jellyfishInstanceOf = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_INSTANCEOF, uuid, checkType, objectType);
         LLVMValueRef instanceOf = buildCall(
                 jellyfishInstanceOf,
                 List.of(buildTypeCast(obj, objectType), buildNull(checkType))
@@ -728,14 +746,31 @@ public class LLVMCodeGen {
     }
 
     public LLVMValueRef buildClassIntrinsic(LLVMTypeRef classType, LLVMTypeRef javaClassType) {
-        String typeStrAscii = StringUtil.getAscii(getLLVMStr(classType));
+        String uuid = StringUtil.getUUID();
 
-        LLVMValueRef jellyfishClass = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_CLASS, typeStrAscii, classType, javaClassType);
+        LLVMValueRef jellyfishClass = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_CLASS, uuid, classType, javaClassType);
         LLVMValueRef classIntrinsic = buildCall(
                 jellyfishClass,
                 List.of(buildNull(classType))
         );
         return classIntrinsic;
+    }
+
+    public LLVMValueRef buildMethodType(LLVMTypeRef retType, List<LLVMTypeRef> paramTypes, LLVMTypeRef javaMethodTypeTy) {
+        String uuid = StringUtil.getUUID();
+        LLVMTypeRef funcPtrType = buildPointerType(
+                buildFunctionType(
+                        retType,
+                        paramTypes
+                )
+        );
+        LLVMValueRef jellyfishMethodType = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_METHODTYPE, uuid, funcPtrType, javaMethodTypeTy);
+        LLVMValueRef methodType = buildCall(
+                jellyfishMethodType,
+                List.of(buildNull(funcPtrType))
+        );
+        return methodType;
+
     }
 
     /*

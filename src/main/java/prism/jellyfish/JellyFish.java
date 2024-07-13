@@ -709,8 +709,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     LLVMValueRef llvmStrVal = getOrTranStringLiteral(str);
                     return llvmStrVal;
                 } else if (jexp instanceof ClassLiteral) {
-                    JClass classClass = world.getClassHierarchy().getClass("java.lang.Class");
-                    LLVMTypeRef javaClassType = tranType(classClass.getType());
+                    JClass jclassClass = world.getClassHierarchy().getClass("java.lang.Class");
+                    LLVMTypeRef javaClassType = tranType(jclassClass.getType());
                     Type theClass = ((ClassLiteral) jexp).getTypeValue();
                     LLVMTypeRef classType = tranType(theClass);
                     LLVMValueRef classIntrinsic = codeGen.buildClassIntrinsic(classType, javaClassType);
@@ -718,7 +718,18 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 } else if (jexp instanceof MethodHandle) {
                     // TODO:
                 } else if (jexp instanceof MethodType) {
-                    // TODO:
+                    JClass jmethodTypeClass = world.getClassHierarchy().getClass("java.lang.Class");
+                    LLVMTypeRef javaMethodTypeClassType = tranType(jmethodTypeClass.getType());
+                    Type jretType = ((MethodType) jexp).getReturnType();
+                    List<Type> jparamTypes = ((MethodType) jexp).getParamTypes();
+                    LLVMTypeRef retType = tranType(jretType);
+                    List<LLVMTypeRef> paramTypes = new ArrayList<>();
+                    for (Type jparamType : jparamTypes) {
+                        LLVMTypeRef paramType = tranType(jparamType);
+                        paramTypes.add(paramType);
+                    }
+                    LLVMValueRef methodType = codeGen.buildMethodType(retType, paramTypes, javaMethodTypeClassType);
+                    return methodType;
                 }
             }
         } else if (jexp instanceof FieldAccess) { // Abstract
