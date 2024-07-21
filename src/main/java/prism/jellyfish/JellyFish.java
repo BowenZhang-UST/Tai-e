@@ -222,8 +222,13 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 boolean ret = maps.setStaticFieldMap(field, fieldVar);
                 as.assertTrue(ret, "The jfield {} has been duplicate translated.", field);
                 continue;
+            } else {
+                boolean ret = maps.setMemberFieldMap(field, fieldTypes.size());
+                as.assertTrue(ret, "The jfield {} has been duplicate translated", field);
+                fieldTypes.add(fllvmType);
             }
-            fieldTypes.add(fllvmType);
+
+
         }
         codeGen.setStructFields(llvmClass, fieldTypes);
         return;
@@ -743,16 +748,22 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMValueRef load = codeGen.buildLoad(ptr, jfield.getName());
                 return load;
             } else if (jexp instanceof InstanceFieldAccess) {
-                // TODO: instance field access
-                as.unimplemented();
                 Var baseVar = ((InstanceFieldAccess) jexp).getBase();
+                LLVMValueRef base = tranRValue(baseVar).get();
+
                 FieldRef fieldRef = ((InstanceFieldAccess) jexp).getFieldRef();
                 JField jfield = fieldRef.resolveNullable();
-                if (jfield != null) {
-                    as.unimplemented();
-                } else {
-                    as.unreachable("The static field access {} contains null field", jexp);
-                }
+                as.assertTrue(jfield != null, "Unexpected unsolvable field {}.", jexp);
+                Optional<Integer> opfieldIndex = maps.getMemberFieldMap(jfield);
+                as.assertTrue(opfieldIndex.isPresent(), "The field {} should have been translated", jfield);
+                int index = opfieldIndex.get().intValue();
+                logger.info("base: {}, index: {}", getLLVMStr(base), index);
+                LLVMValueRef ptr = codeGen.buildGEP(base,
+                        List.of(codeGen.buildConstInt(codeGen.buildIntType(32), 0),
+                                codeGen.buildConstInt(codeGen.buildIntType(32), index)));
+                logger.info("Before building Load");
+                LLVMValueRef load = codeGen.buildLoad(ptr, jfield.getName());
+                return load;
             }
         } else if (jexp instanceof UnaryExp) { // Interface
             if (jexp instanceof ArrayLengthExp) {
@@ -1061,8 +1072,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
             LLVMValueRef base = tranRValue(baseVar, codeGen.buildPointerType(codeGen.buildArrayType(elementType, 0)), true);     // ::F1
 
-            LLVMValueRef index1 = codeGen.buildConstInt(codeGen.buildIntType(64), 0);
-            LLVMValueRef index2 = tranRValue(indexVar, codeGen.buildIntType(64), true);
+            LLVMValueRef index1 = codeGen.buildConstInt(codeGen.buildIntType(32), 0);
+            LLVMValueRef index2 = tranRValue(indexVar, codeGen.buildIntType(32), true);
             LLVMValueRef gep = codeGen.buildGEP(base, List.of(index1, index2));
             LLVMValueRef load = codeGen.buildLoad(gep, StringUtil.getVarNameAsLoad(baseVar));
             return load;
@@ -1103,7 +1114,19 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     return ptr;
                 }
             } else if (jexp instanceof InstanceFieldAccess) {
-                as.unimplemented();
+                Var baseVar = ((InstanceFieldAccess) jexp).getBase();
+                LLVMValueRef base = tranRValue(baseVar).get();
+
+                FieldRef fieldRef = ((InstanceFieldAccess) jexp).getFieldRef();
+                JField jfield = fieldRef.resolveNullable();
+                as.assertTrue(jfield != null, "Unexpected unsolvable field {}.", jexp);
+                Optional<Integer> opfieldIndex = maps.getMemberFieldMap(jfield);
+                as.assertTrue(opfieldIndex.isPresent(), "The field {} should have been translated", jfield);
+                int index = opfieldIndex.get().intValue();
+                LLVMValueRef ptr = codeGen.buildGEP(base,
+                        List.of(codeGen.buildConstInt(codeGen.buildIntType(32), 0),
+                                codeGen.buildConstInt(codeGen.buildIntType(32), index)));
+                return ptr;
             }
         } else if (jexp instanceof Var) {
             // We have this assertion because we don't want to return null.
@@ -1133,8 +1156,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
             LLVMValueRef base = tranRValue(baseVar, codeGen.buildPointerType(codeGen.buildArrayType(elementType, 0)), true);   // ::F1
 
-            LLVMValueRef index1 = codeGen.buildConstInt(codeGen.buildIntType(64), 0);
-            LLVMValueRef index2 = tranRValue(indexVar, codeGen.buildIntType(64), true);
+            LLVMValueRef index1 = codeGen.buildConstInt(codeGen.buildIntType(32), 0);
+            LLVMValueRef index2 = tranRValue(indexVar, codeGen.buildIntType(32), true);
             List<LLVMValueRef> indices = List.of(index1, index2);
             LLVMValueRef gep = codeGen.buildGEP(base, indices);
             return gep;

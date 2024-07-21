@@ -27,14 +27,17 @@ public class Mappings {
     public HashMap<JMethod, LLVMValueRef> methodMap;
     public HashMap<Var, LLVMValueRef> varMap;
     public HashMap<JField, LLVMValueRef> staticFieldMap;
+    public HashMap<JField, Integer> memberFieldMap;
     public HashMap<String, LLVMValueRef> stringPoolMap;
     public HashMap<Stmt, LLVMBasicBlockRef> stmtBlockMap;
+
 
     public Mappings() {
         this.classMap = new HashMap<>();
         this.methodMap = new HashMap<>();
         this.varMap = new HashMap<>();
         this.staticFieldMap = new HashMap<>();
+        this.memberFieldMap = new HashMap<>();
         this.stringPoolMap = new HashMap<>();
         this.stmtBlockMap = new HashMap<>();
     }
@@ -110,15 +113,27 @@ public class Mappings {
     }
 
     /*
-     * Field map.
+     * Static field map.
      */
     public boolean setStaticFieldMap(JField jfield, LLVMValueRef llvmVal) {
-        as.assertTrue(jfield.isStatic(), String.format("The field %s should be static.", jfield));
+        as.assertTrue(jfield.isStatic(), "The field {} should be static.", jfield);
         return setMap(staticFieldMap, jfield, llvmVal);
     }
 
     public Optional<LLVMValueRef> getStaticFieldMap(JField jfield) {
         return getFromMap(staticFieldMap, jfield);
+    }
+
+    /*
+     * Member field map.
+     */
+    public boolean setMemberFieldMap(JField jfield, Integer index) {
+        as.assertTrue(!jfield.isStatic(), "The field {} should be member field", jfield);
+        return setMap(memberFieldMap, jfield, index);
+    }
+
+    public Optional<Integer> getMemberFieldMap(JField jfield) {
+        return getFromMap(memberFieldMap, jfield);
     }
 
     /*
