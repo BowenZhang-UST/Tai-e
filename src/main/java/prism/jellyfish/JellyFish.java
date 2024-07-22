@@ -157,6 +157,34 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     /*
+     * Resolution of OOP features
+     */
+    public LLVMValueRef resolveMemberField(JField jfield, Var baseVar) {
+        Type baseType = baseVar.getType();
+        as.assertTrue(baseType instanceof ClassType, "The base var {} should be of classType", baseVar);
+
+        JClass baseClass = ((ClassType) baseType).getJClass();
+        JClass tarClass = jfield.getDeclaringClass();
+        as.assertTrue(classHierarchy.isSubclass(tarClass, baseClass), "target class should be super of base. Target: {}. Base: {}", tarClass, baseClass);
+
+        LLVMTypeRef llvmTarClass = tranType(tarClass.getType());
+        LLVMValueRef base = tranRValue(baseVar, llvmTarClass, true);
+
+        Optional<Integer> opfieldIndex = maps.getMemberFieldMap(jfield);
+        as.assertTrue(opfieldIndex.isPresent(), "The field {} should have been translated", jfield);
+        int index = opfieldIndex.get().intValue();
+        LLVMValueRef ptr = codeGen.buildGEP(
+                base,
+                List.of(
+                        codeGen.buildConstInt(codeGen.buildIntType(32), 0),
+                        codeGen.buildConstInt(codeGen.buildIntType(32), index)
+                )
+        );
+        return ptr;
+    }
+
+
+    /*
      * Translations from Java to LLVM
      */
 
@@ -188,6 +216,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         // 2. Super-class reference
         List<JClass> superClasses = new ArrayList<>();
         JClass sclass = jclass.getSuperClass();
+
         while (sclass != null) {
             superClasses.add(sclass);
             sclass = sclass.getSuperClass();
@@ -209,9 +238,27 @@ public class JellyFish extends ProgramAnalysis<Void> {
         Optional<LLVMTypeRef> opllvmClass = maps.getClassMap(jclass);
         as.assertTrue(opllvmClass.isPresent(), "The class declaration of {} should have been translated.", jclass);
         LLVMTypeRef llvmClass = maps.getClassMap(jclass).get();
-        Collection<JField> fields = jclass.getDeclaredFields();
+
+        JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
+        LLVMTypeRef llvmObjClass = tranType(objClass.getType());
 
         List<LLVMTypeRef> fieldTypes = new ArrayList<>();
+        // 1. super reference
+        JClass sclass = jclass.getSuperClass();
+        if (sclass != null) {
+            LLVMTypeRef llvmSuperClass = tranType(sclass.getType());
+            fieldTypes.add(llvmSuperClass);
+        } else {
+            fieldTypes.add(llvmObjClass);
+        }
+        // 2. Sub reference
+        fieldTypes.add(llvmObjClass);
+
+        // 3. Virtual method Fields
+        // TODO:
+
+        // 4. Static and Member Fields
+        Collection<JField> fields = jclass.getDeclaredFields();
         for (JField field : fields) {
             String fieldName = field.getName();
             Type ftype = field.getType();
@@ -227,8 +274,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 as.assertTrue(ret, "The jfield {} has been duplicate translated", field);
                 fieldTypes.add(fllvmType);
             }
-
-
         }
         codeGen.setStructFields(llvmClass, fieldTypes);
         return;
@@ -749,19 +794,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 return load;
             } else if (jexp instanceof InstanceFieldAccess) {
                 Var baseVar = ((InstanceFieldAccess) jexp).getBase();
-                LLVMValueRef base = tranRValue(baseVar).get();
-
                 FieldRef fieldRef = ((InstanceFieldAccess) jexp).getFieldRef();
                 JField jfield = fieldRef.resolveNullable();
                 as.assertTrue(jfield != null, "Unexpected unsolvable field {}.", jexp);
-                Optional<Integer> opfieldIndex = maps.getMemberFieldMap(jfield);
-                as.assertTrue(opfieldIndex.isPresent(), "The field {} should have been translated", jfield);
-                int index = opfieldIndex.get().intValue();
-                logger.info("base: {}, index: {}", getLLVMStr(base), index);
-                LLVMValueRef ptr = codeGen.buildGEP(base,
-                        List.of(codeGen.buildConstInt(codeGen.buildIntType(32), 0),
-                                codeGen.buildConstInt(codeGen.buildIntType(32), index)));
-                logger.info("Before building Load");
+                LLVMValueRef ptr = resolveMemberField(jfield, baseVar);
+
                 LLVMValueRef load = codeGen.buildLoad(ptr, jfield.getName());
                 return load;
             }
@@ -1115,17 +1152,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 }
             } else if (jexp instanceof InstanceFieldAccess) {
                 Var baseVar = ((InstanceFieldAccess) jexp).getBase();
-                LLVMValueRef base = tranRValue(baseVar).get();
-
                 FieldRef fieldRef = ((InstanceFieldAccess) jexp).getFieldRef();
                 JField jfield = fieldRef.resolveNullable();
                 as.assertTrue(jfield != null, "Unexpected unsolvable field {}.", jexp);
-                Optional<Integer> opfieldIndex = maps.getMemberFieldMap(jfield);
-                as.assertTrue(opfieldIndex.isPresent(), "The field {} should have been translated", jfield);
-                int index = opfieldIndex.get().intValue();
-                LLVMValueRef ptr = codeGen.buildGEP(base,
-                        List.of(codeGen.buildConstInt(codeGen.buildIntType(32), 0),
-                                codeGen.buildConstInt(codeGen.buildIntType(32), index)));
+                LLVMValueRef ptr = resolveMemberField(jfield, baseVar);
                 return ptr;
             }
         } else if (jexp instanceof Var) {
