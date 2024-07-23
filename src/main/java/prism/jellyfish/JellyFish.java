@@ -34,6 +34,8 @@ import prism.jellyfish.util.StringUtil;
 import static prism.llvm.LLVMUtil.getElementType;
 import static prism.llvm.LLVMUtil.getValueType;
 import static prism.llvm.LLVMUtil.getLLVMStr;
+import static prism.llvm.LLVMUtil.getParamTypes;
+import static prism.llvm.LLVMUtil.getFuncType;
 
 import javax.annotation.Nullable;
 
@@ -185,8 +187,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return ptr;
     }
 
-    public boolean isVirtualMethodRoot(JMethod jmethod) {
-        if (jmethod.isStatic()) {
+    public boolean isRootVirtualMethod(JMethod jmethod) {
+        if (!isVirtualMethod(jmethod)) {
             return false;
         }
 
@@ -201,7 +203,78 @@ public class JellyFish extends ProgramAnalysis<Void> {
             curSuperClass = curSuperClass.getSuperClass();
         }
         return true;
+    }
 
+    public boolean isVirtualMethod(JMethod jmethod) {
+        if (jmethod.isStatic() || jmethod.isConstructor()) {
+            return false;
+        }
+        JClass declClass = jmethod.getDeclaringClass();
+        Subsignature sig = jmethod.getSubsignature();
+        Collection<JClass> subClasses = classHierarchy.getAllSubclassesOf(declClass);
+        for (JClass subClass : subClasses) {
+            if (subClass.equals(declClass)) {
+                continue;
+            }
+            JMethod candidate = subClass.getDeclaredMethod(sig);
+            if (candidate != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public LLVMValueRef resolveMethod(Var base, Subsignature sig) {
+        Type baseType = base.getType();
+        as.assertTrue(baseType instanceof ClassType, "The base var should be ClassType. Got {}.", baseType);
+        JClass baseClass = ((ClassType) baseType).getJClass();
+
+        JMethod declaredMethod = baseClass.getDeclaredMethod(sig);
+
+        // Check if it's a direct call:
+        if (!isVirtualMethod(declaredMethod)) {
+            return getOrTranMethod(declaredMethod);
+        }
+
+        // Otherwise, translate the virtual call by finding the root virtual method:
+        JClass curClass = baseClass;
+        Integer indexFuncPtr = null;
+        int steps = 0;
+        while (curClass != null) {
+            JMethod candidate = curClass.getDeclaredMethod(sig);
+            if (candidate != null) {
+                Optional<Integer> opIndex = maps.getVirtualMethodMap(candidate);
+                if (opIndex.isPresent()) {
+                    indexFuncPtr = opIndex.get();
+                    break;
+                }
+            }
+            curClass = curClass.getSuperClass();
+            steps += 1;
+        }
+        as.assertTrue(curClass != null && indexFuncPtr != null,
+                "Unexpected class hierarchy. The virtual method is not found. Base class: {}, sig: {}", baseClass, sig);
+        JClass tarClass = curClass;
+
+        LLVMValueRef llvmVar = tranRValue(base, tranType(baseType), false);
+        List<LLVMValueRef> indexes = new ArrayList<>();
+
+        for (int i = 0; i < steps + 1; i++) {
+            indexes.add(
+                    codeGen.buildConstInt(
+                            codeGen.buildIntType(32),
+                            0
+                    )
+            );
+        }
+        indexes.add(codeGen.buildConstInt(
+                codeGen.buildIntType(32),
+                indexFuncPtr.intValue()
+        ));
+
+        LLVMValueRef funcPtrPtr = codeGen.buildGEP(llvmVar, indexes);
+        LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
+        return funcPtr;
     }
 
 
@@ -266,7 +339,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMTypeRef llvmObjClass = tranType(objClass.getType());
 
         List<LLVMTypeRef> fieldTypes = new ArrayList<>();
-        // 1. super reference
+        // 1. "super field"
         JClass sclass = jclass.getSuperClass();
         if (sclass != null) {
             LLVMTypeRef llvmSuperClass = tranTypeAlloc(sclass.getType());
@@ -274,13 +347,13 @@ public class JellyFish extends ProgramAnalysis<Void> {
         } else {
             fieldTypes.add(llvmObjClass);
         }
-        // 2. Sub reference
+        // 2. "sub pointer"
         fieldTypes.add(llvmObjClass);
 
         // 3. Virtual method Fields
         Collection<JMethod> methods = jclass.getDeclaredMethods();
         for (JMethod method : methods) {
-            if (!isVirtualMethodRoot(method)) {
+            if (!isRootVirtualMethod(method)) {
                 continue;
             }
             LLVMTypeRef funcType = tranMethodType(method);
@@ -1083,40 +1156,37 @@ public class JellyFish extends ProgramAnalysis<Void> {
             } else if (jexp instanceof InvokeDynamic) {
                 // TODO:
             } else if (jexp instanceof InvokeInstanceExp) { // Abstract
-                Var thisVar = ((InvokeInstanceExp) jexp).getBase();
+                Var baseVar = ((InvokeInstanceExp) jexp).getBase();
                 MethodRef methodRef = ((InvokeInstanceExp) jexp).getMethodRef();
-                JMethod jcallee = methodRef.resolveNullable();
-                if (jcallee != null) {
-                    /*
-                     * T-Invoke Instance:
-                     *     F(B1, B2...)
-                     *   F::T1->T2  B::T3 B2...::T4
-                     * ---------------------------
-                     *     T3 = T1   T4 = T2
-                     */
-                    LLVMValueRef callee = getOrTranMethod(jcallee);
-                    as.assertTrue(LLVM.LLVMCountParams(callee) == ((InvokeInstanceExp) jexp).getArgCount() + 1,
-                            "Argument number doesn't match. LLVM func: {}, instance invoke: {}", getLLVMStr(callee), jexp);
+                Subsignature sig = methodRef.getSubsignature();
+                LLVMValueRef callee = resolveMethod(baseVar, sig);
 
-                    LLVMValueRef llvm0thParam = LLVM.LLVMGetParam(callee, 0);
-                    LLVMValueRef llvmThis = tranRValue(thisVar, getValueType(llvm0thParam), true);
-                    List<LLVMValueRef> args = new ArrayList<>();
-                    args.add(llvmThis);
-
-                    List<Var> jargs = ((InvokeInstanceExp) jexp).getArgs();
-                    for (int i = 1; i < jargs.size() + 1; i++) {
-                        LLVMValueRef llvmIthParam = LLVM.LLVMGetParam(callee, i);
-                        Var jarg = jargs.get(i - 1);
-                        LLVMValueRef llvmArg = tranRValue(jarg, getValueType(llvmIthParam), true);
-                        args.add(llvmArg);
-                    }
-                    LLVMValueRef call = codeGen.buildCall(callee, args);
-                    return call;
-                } else {
-                    // TODO: unknown call target
-                    as.unimplemented();
-                    return null;
+                /*
+                 * T-InvokeInstance:
+                 *     F(B1, B2...)
+                 *   F::T1->T2  B::T3 B2...::T4
+                 * ---------------------------
+                 *     T3 = T1   T4 = T2
+                 */
+                LLVMTypeRef funcType = getFuncType(callee);
+                as.assertTrue(LLVM.LLVMCountParamTypes(funcType) == ((InvokeInstanceExp) jexp).getArgCount() + 1,
+                        "Argument number doesn't match. LLVM func: {} with {}, instance invoke: {} with {}",
+                        getLLVMStr(callee), LLVM.LLVMCountParamTypes(funcType),
+                        jexp, ((InvokeInstanceExp) jexp).getArgCount() + 1);
+                List<LLVMTypeRef> paramTypes = getParamTypes(funcType);
+                LLVMTypeRef llvm0thParamTy = paramTypes.get(0);
+                LLVMValueRef llvmThis = tranRValue(baseVar, llvm0thParamTy, true);
+                List<LLVMValueRef> args = new ArrayList<>();
+                args.add(llvmThis);
+                List<Var> jargs = ((InvokeInstanceExp) jexp).getArgs();
+                for (int i = 1; i < jargs.size() + 1; i++) {
+                    LLVMTypeRef llvmIthParamTy = paramTypes.get(i);
+                    Var jarg = jargs.get(i - 1);
+                    LLVMValueRef llvmArg = tranRValue(jarg, llvmIthParamTy, true);
+                    args.add(llvmArg);
                 }
+                LLVMValueRef call = codeGen.buildCall(callee, args);
+                return call;
             }
         } else if (jexp instanceof Var) {
             if (jexp.getType() instanceof NullType) {

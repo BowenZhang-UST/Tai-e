@@ -11,6 +11,9 @@ import javax.annotation.Nullable;
 
 import static prism.llvm.LLVMUtil.getValueType;
 import static prism.llvm.LLVMUtil.getLLVMStr;
+import static prism.llvm.LLVMUtil.getFuncType;
+import static prism.llvm.LLVMUtil.getParamTypes;
+
 
 import prism.jellyfish.util.ArrayBuilder;
 import prism.jellyfish.util.AssertUtil;
@@ -498,26 +501,25 @@ public class LLVMCodeGen {
 
     @Nullable
     public LLVMValueRef buildCall(LLVMValueRef func, List<LLVMValueRef> args) {
-
-        as.assertTrue(args.size() == LLVM.LLVMCountParams(func),
+        LLVMTypeRef funcType = getFuncType(func);
+        List<LLVMTypeRef> paramTypes = getParamTypes(funcType);
+        as.assertTrue(args.size() == LLVM.LLVMCountParamTypes(funcType),
                 "The argument number doesn't match. Func: {}. Args: {}", getLLVMStr(func), args.stream().map(arg -> getLLVMStr(arg)).toList());
 
         ArrayBuilder<LLVMValueRef> argArray = new ArrayBuilder<>();
         for (int i = 0; i < args.size(); i++) {
-            LLVMValueRef param = LLVM.LLVMGetParam(func, i);
-            LLVMTypeRef paramType = getValueType(param);
+            LLVMTypeRef paramType = paramTypes.get(i);
+
             LLVMValueRef arg = args.get(i);
             LLVMTypeRef argType = getValueType(arg);
 
             as.assertTrue(paramType.equals(argType),
-                    "The {}th parameter and argument don't match type. Arg: {}. Param: {}.",
-                    i, getLLVMStr(arg), getLLVMStr(param));
+                    "The {}th parameter and argument don't match type. Arg: {}. Param type: {}.",
+                    i, getLLVMStr(arg), getLLVMStr(paramType));
             argArray.add(arg);
         }
 
-        LLVMTypeRef funcPtrType = getValueType(func);
-        as.assertTrue(LLVM.LLVMGetTypeKind(funcPtrType) == LLVM.LLVMPointerTypeKind, "Should be function pointer type");
-        LLVMTypeRef retType = LLVM.LLVMGetReturnType(LLVM.LLVMGetElementType(funcPtrType));
+        LLVMTypeRef retType = LLVM.LLVMGetReturnType(funcType);
 
         if (LLVM.LLVMGetTypeKind(retType) == LLVM.LLVMVoidTypeKind) {
             LLVMValueRef call = LLVM.LLVMBuildCall(builder, func, argArray.build(), argArray.length(), "");
