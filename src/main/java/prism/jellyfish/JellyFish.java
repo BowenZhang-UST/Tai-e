@@ -120,12 +120,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public LLVMValueRef getOrTranStringLiteral(String str) {
-        // TODO: support string pool
-//        Optional<LLVMValueRef> opStrVal = maps.getStringPoolMap(str);
-//        if(opStrVal.isPresent()) {
-//            // Already in string pool
-//            return opStrVal.get();
-//        }
         /*
          * Trans:
          * Java String literal  "XXX"
@@ -143,7 +137,15 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMValueRef llvmInitMethod = opInitMethod.get();
 
         // 1.
-        LLVMValueRef llvmStrConst = codeGen.buildConstString(str);
+        LLVMValueRef llvmStrConst;
+        Optional<LLVMValueRef> opStrVal = maps.getStringPoolMap(str);
+        if (opStrVal.isPresent()) {
+            // Already in string pool
+            llvmStrConst = opStrVal.get();
+        } else {
+            llvmStrConst = codeGen.buildConstString(str);
+            maps.setStringPoolMap(str, llvmStrConst);
+        }
         LLVMTypeRef byteArrayType = getValueType(LLVM.LLVMGetParam(llvmInitMethod, 1));
         LLVMValueRef llvmStrConst2 = codeGen.buildTypeCast(llvmStrConst, byteArrayType);
 
@@ -153,6 +155,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
         // 3.
         codeGen.buildCall(llvmInitMethod, List.of(llvmStrPtr, llvmStrConst2));
+//        maps.setStringPoolMap(str, llvmStrPtr);
         return llvmStrPtr;
     }
 
