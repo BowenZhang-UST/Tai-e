@@ -65,10 +65,10 @@ We need to perform some optimizations and analyses to improve the quality of the
 1. Mem2Reg: Because of the `Var` in Tai-e, we have created many redundant load-store pairs through
    the vars.
 2. Simplify CFG. Currently, each Tai-e statement correponds to a block. We need to do some merge.
-3. Virtual call & field access resolution. We need to convert them to the style of function pointers
-   such that the downstream pointer and call-graph analysis can understand them well.
+3. Down/up casting identification: When we perform up or down casting in Java, it's translated to
+   direct bitcast.
 
-**Analyses**
+**High-level information resolution**
 
-1. OO information resolution.
-2. Debug information resolution.
+1. resolve class hierarchy
+2. resolve debug information
