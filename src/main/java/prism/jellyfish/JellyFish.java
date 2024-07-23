@@ -155,7 +155,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
         // 3.
         codeGen.buildCall(llvmInitMethod, List.of(llvmStrPtr, llvmStrConst2));
-//        maps.setStringPoolMap(str, llvmStrPtr);
         return llvmStrPtr;
     }
 
@@ -184,6 +183,25 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 )
         );
         return ptr;
+    }
+
+    public boolean isVirtualMethodRoot(JMethod jmethod) {
+        if (jmethod.isStatic()) {
+            return false;
+        }
+
+        JClass declClass = jmethod.getDeclaringClass();
+        Subsignature sig = jmethod.getSubsignature();
+        JClass curSuperClass = declClass.getSuperClass();
+        while (curSuperClass != null) {
+            JMethod smethod = curSuperClass.getDeclaredMethod(sig);
+            if (smethod != null) {
+                return false;
+            }
+            curSuperClass = curSuperClass.getSuperClass();
+        }
+        return true;
+
     }
 
 
@@ -216,18 +234,20 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         }
 
-        // 2. Super-class reference
+        // 2. class hierarchy reference
         List<JClass> superClasses = new ArrayList<>();
-        JClass sclass = jclass.getSuperClass();
-
-        while (sclass != null) {
-            superClasses.add(sclass);
-            sclass = sclass.getSuperClass();
+        JClass supClass = jclass.getSuperClass();
+        while (supClass != null) {
+            superClasses.add(supClass);
+            supClass = supClass.getSuperClass();
         }
-
         for (JClass superClass : superClasses) {
             LLVMTypeRef llvmSClass = getOrTranClass(superClass);
         }
+//        Collection<JClass> subClasses = classHierarchy.getAllSubclassesOf(jclass);
+//        for (JClass subClass: subClasses) {
+//            LLVMTypeRef llvmSClass = getOrTranClass(subClass);
+//        }
 
         // 3. Interface reference
         Collection<JClass> jinterfaces = jclass.getInterfaces();
@@ -258,7 +278,18 @@ public class JellyFish extends ProgramAnalysis<Void> {
         fieldTypes.add(llvmObjClass);
 
         // 3. Virtual method Fields
-        // TODO:
+        Collection<JMethod> methods = jclass.getDeclaredMethods();
+        for (JMethod method : methods) {
+            if (!isVirtualMethodRoot(method)) {
+                continue;
+            }
+            LLVMTypeRef funcType = tranFuncType(method);
+            LLVMTypeRef funcPtrType = codeGen.buildPointerType(funcType);
+
+            boolean ret = maps.setVirtualMethodMap(method, fieldTypes.size());
+            as.assertTrue(ret, "The method {} has been duplicate translated", method);
+            fieldTypes.add(funcPtrType);
+        }
 
         // 4. Static and Member Fields
         Collection<JField> fields = jclass.getDeclaredFields();
@@ -294,6 +325,24 @@ public class JellyFish extends ProgramAnalysis<Void> {
         } else {
             return type1;
         }
+    }
+
+    private LLVMTypeRef tranFuncType(JMethod jmethod) {
+        JClass jclass = jmethod.getDeclaringClass();
+        List<LLVMTypeRef> paramTypes = new ArrayList<>();
+        if (!jmethod.isStatic()) {
+            ClassType classType = jclass.getType();
+            LLVMTypeRef llvmClassType = tranType(classType);
+            paramTypes.add(llvmClassType);
+        }
+        for (Type jType : jmethod.getParamTypes()) {
+            LLVMTypeRef type = tranType(jType);
+            paramTypes.add(type);
+        }
+        Type jretType = jmethod.getReturnType();
+        LLVMTypeRef retType = tranType(jretType);
+        LLVMTypeRef funcType = codeGen.buildFunctionType(retType, paramTypes);
+        return funcType;
     }
 
     public LLVMTypeRef tranType(Type jType) {
@@ -363,19 +412,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
     public LLVMValueRef tranMethod(JMethod jmethod) {
         JClass jclass = jmethod.getDeclaringClass();
         String methodName = StringUtil.getMethodName(jclass, jmethod);
-        List<LLVMTypeRef> paramTypes = new ArrayList<>();
-        if (!jmethod.isStatic()) {
-            ClassType classType = jclass.getType();
-            LLVMTypeRef llvmClassType = tranType(classType);
-            paramTypes.add(llvmClassType);
-        }
-        for (Type jType : jmethod.getParamTypes()) {
-            LLVMTypeRef type = tranType(jType);
-            paramTypes.add(type);
-        }
-        Type jretType = jmethod.getReturnType();
-        LLVMTypeRef retType = tranType(jretType);
-        LLVMTypeRef funcType = codeGen.buildFunctionType(retType, paramTypes);
+        LLVMTypeRef funcType = tranFuncType(jmethod);
+
         LLVMValueRef func = codeGen.addFunction(funcType, methodName);
         boolean ret = maps.setMethodMap(jmethod, func);
         as.assertTrue(ret, "The method {} has been duplicate translated.", jmethod);

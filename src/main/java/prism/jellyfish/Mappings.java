@@ -28,6 +28,7 @@ public class Mappings {
     public HashMap<Var, LLVMValueRef> varMap;
     public HashMap<JField, LLVMValueRef> staticFieldMap;
     public HashMap<JField, Integer> memberFieldMap;
+    public HashMap<JMethod, Integer> virtualMethodMap;
     public HashMap<String, LLVMValueRef> stringPoolMap;
     public HashMap<Stmt, LLVMBasicBlockRef> stmtBlockMap;
 
@@ -38,6 +39,7 @@ public class Mappings {
         this.varMap = new HashMap<>();
         this.staticFieldMap = new HashMap<>();
         this.memberFieldMap = new HashMap<>();
+        this.virtualMethodMap = new HashMap<>();
         this.stringPoolMap = new HashMap<>();
         this.stmtBlockMap = new HashMap<>();
     }
@@ -134,6 +136,17 @@ public class Mappings {
 
     public Optional<Integer> getMemberFieldMap(JField jfield) {
         return getFromMap(memberFieldMap, jfield);
+    }
+
+    /*
+     * Virtual method map.
+     */
+    public boolean setVirtualMethodMap(JMethod jmethod, Integer index) {
+        return setMap(virtualMethodMap, jmethod, index);
+    }
+
+    public Optional<Integer> getVirtualMethodMap(JMethod jmethod) {
+        return getFromMap(virtualMethodMap, jmethod);
     }
 
     /*
