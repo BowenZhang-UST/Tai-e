@@ -269,7 +269,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         // 1. super reference
         JClass sclass = jclass.getSuperClass();
         if (sclass != null) {
-            LLVMTypeRef llvmSuperClass = tranType(sclass.getType());
+            LLVMTypeRef llvmSuperClass = tranTypeAlloc(sclass.getType());
             fieldTypes.add(llvmSuperClass);
         } else {
             fieldTypes.add(llvmObjClass);
@@ -283,7 +283,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             if (!isVirtualMethodRoot(method)) {
                 continue;
             }
-            LLVMTypeRef funcType = tranFuncType(method);
+            LLVMTypeRef funcType = tranMethodType(method);
             LLVMTypeRef funcPtrType = codeGen.buildPointerType(funcType);
 
             boolean ret = maps.setVirtualMethodMap(method, fieldTypes.size());
@@ -327,7 +327,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         }
     }
 
-    private LLVMTypeRef tranFuncType(JMethod jmethod) {
+    private LLVMTypeRef tranMethodType(JMethod jmethod) {
         JClass jclass = jmethod.getDeclaringClass();
         List<LLVMTypeRef> paramTypes = new ArrayList<>();
         if (!jmethod.isStatic()) {
@@ -412,7 +412,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     public LLVMValueRef tranMethod(JMethod jmethod) {
         JClass jclass = jmethod.getDeclaringClass();
         String methodName = StringUtil.getMethodName(jclass, jmethod);
-        LLVMTypeRef funcType = tranFuncType(jmethod);
+        LLVMTypeRef funcType = tranMethodType(jmethod);
 
         LLVMValueRef func = codeGen.addFunction(funcType, methodName);
         boolean ret = maps.setMethodMap(jmethod, func);
@@ -422,7 +422,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public void tranMethodBody(JMethod jmethod) {
-        // TODO: enable all methods
+        // TODO: enable all methods after the tool is mature
         if (!jmethod.getDeclaringClass().isApplication()) {
             // Debug use: Skip non application class
             return;
