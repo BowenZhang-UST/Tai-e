@@ -62,61 +62,97 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     @Override
     public Void analyze() {
-        // Pass 1
-        List<JClass> jclasses = classHierarchy.applicationClasses().collect(Collectors.toList());
+        List<JClass> jclasses = classHierarchy.applicationClasses().toList();
         for (JClass jclass : jclasses) {
             String className = jclass.getName();
             String moduleName = jclass.getModuleName();
             String simpleName = jclass.getSimpleName();
-            logger.info("Found class:name: {}, module name: {}, simple name:{}", className, moduleName, simpleName);
+            logger.info("Init class: name: {}, module name: {}, simple name:{}", className, moduleName, simpleName);
 
             // Class
-            LLVMTypeRef llvmClass = getOrTranClass(jclass);
-        }
-
-
-        // Pass 2
-        for (JClass jclass : maps.getAllClasses()) {
-            // Class fields: fill in the types.
-            this.tranClassFields(jclass);
-
-            // Method Declarations
-            Collection<JMethod> methods = jclass.getDeclaredMethods();
-            for (JMethod jmethod : methods) {
-                LLVMValueRef llvmMethod = this.tranMethod(jmethod);
-            }
-        }
-
-        // Pass 3
-        for (JMethod jmethod : maps.getAllMethods()) {
-            this.tranMethodBody(jmethod);
+            LLVMTypeRef llvmClass = getOrTranClass(jclass, ClassDepID.DEP_METHOD_DEF);
         }
 
         codeGen.generate();
         return null;
     }
 
+
     /*
      * Mappings between Java and LLVM
      */
-    public LLVMTypeRef getOrTranClass(JClass jclass) {
-        Optional<LLVMTypeRef> llvmClass = maps.getClassMap(jclass);
-        if (llvmClass.isPresent()) {
-            LLVMTypeRef existClass = llvmClass.get();
-            return existClass;
-        } else {
-            LLVMTypeRef newClass = this.tranClass(jclass);
-            return newClass;
+    public enum ClassDepID {
+        DEP_DECL(0),
+        DEP_FIELDS(1),
+        DEP_METHOD_DECL(2),
+        DEP_METHOD_DEF(3);
+        private final int ord;
+
+        ClassDepID(int ord) {
+            this.ord = ord;
+        }
+
+        public int getOrd() {
+            return ord;
         }
     }
 
-    public LLVMValueRef getOrTranMethod(JMethod jmethod) {
+    public LLVMTypeRef getOrTranClass(JClass jclass, ClassDepID dep) {
+        Optional<LLVMTypeRef> llvmClass = maps.getClassMap(jclass);
+        LLVMTypeRef theClass;
+        ClassDepID curDep = null;
+        if (llvmClass.isPresent()) {
+            LLVMTypeRef existClass = llvmClass.get();
+            theClass = existClass;
+
+            curDep = maps.getClassStatusMap(jclass).get();
+            logger.info("Tran Class (Exist): {} {}=>{}", jclass, curDep, dep);
+        } else {
+            logger.info("Tran Class (New): {} =>{}", jclass, dep);
+            LLVMTypeRef newClass = this.tranClassDecl(jclass);
+            boolean ret = maps.setClassMap(jclass, newClass);
+            as.assertTrue(ret, "The jclass {} has been duplicate translated.", jclass);
+            theClass = newClass;
+
+            ret = maps.setClassStatusMap(jclass, ClassDepID.DEP_DECL);
+            as.assertTrue(ret, "The status of jclass {} has been duplicate updated.", jclass);
+            curDep = ClassDepID.DEP_DECL;
+        }
+
+        for (int i = curDep.getOrd() + 1; i <= dep.getOrd(); i++) {
+            if (i == ClassDepID.DEP_DECL.getOrd()) {
+                logger.info("Handle DEP_DECL: {}", jclass);
+                continue;
+            } else if (i == ClassDepID.DEP_FIELDS.getOrd()) {
+                logger.info("Handle, DEP_FIELDS: {}", jclass);
+                this.tranClassFields(jclass);
+                maps.setClassStatusMap(jclass, ClassDepID.DEP_FIELDS);
+            } else if (i == ClassDepID.DEP_METHOD_DECL.getOrd()) {
+                logger.info("Handle, DEP_METHOD_DECL: {}", jclass);
+                Collection<JMethod> methods = jclass.getDeclaredMethods();
+                for (JMethod jmethod : methods) {
+                    LLVMValueRef llvmMethod = getOrTranMethodDecl(jmethod);
+                }
+                maps.setClassStatusMap(jclass, ClassDepID.DEP_METHOD_DECL);
+            } else if (i == ClassDepID.DEP_METHOD_DEF.getOrd()) {
+                logger.info("Handle, DEP_METHOD_DEF: {}", jclass);
+                Collection<JMethod> methods = jclass.getDeclaredMethods();
+                for (JMethod jmethod : methods) {
+                    this.tranMethodBody(jmethod);
+                }
+                maps.setClassStatusMap(jclass, ClassDepID.DEP_METHOD_DEF);
+            }
+        }
+        return theClass;
+    }
+
+    public LLVMValueRef getOrTranMethodDecl(JMethod jmethod) {
         Optional<LLVMValueRef> llvmMethod = maps.getMethodMap(jmethod);
         if (llvmMethod.isPresent()) {
             LLVMValueRef existMethod = llvmMethod.get();
             return existMethod;
         } else {
-            LLVMValueRef newMethod = this.tranMethod(jmethod);
+            LLVMValueRef newMethod = this.tranMethodDecl(jmethod);
             return newMethod;
         }
     }
@@ -152,7 +188,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMValueRef llvmStrConst2 = codeGen.buildTypeCast(llvmStrConst, byteArrayType);
 
         // 2.
-        LLVMTypeRef llvmStringClass = tranTypeAlloc(stringClass.getType());
+        LLVMTypeRef llvmStringClass = tranTypeAlloc(stringClass.getType(), ClassDepID.DEP_FIELDS);
         LLVMValueRef llvmStrPtr = codeGen.buildMalloc(llvmStringClass);
 
         // 3.
@@ -160,129 +196,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return llvmStrPtr;
     }
 
-    /*
-     * Resolution of OOP features
-     */
-    public LLVMValueRef resolveMemberField(JField jfield, Var baseVar) {
-        Type baseType = baseVar.getType();
-        as.assertTrue(baseType instanceof ClassType, "The base var {} should be of classType", baseVar);
-
-        JClass baseClass = ((ClassType) baseType).getJClass();
-        JClass tarClass = jfield.getDeclaringClass();
-        as.assertTrue(classHierarchy.isSubclass(tarClass, baseClass), "target class should be super of base. Target: {}. Base: {}", tarClass, baseClass);
-
-        LLVMTypeRef llvmTarClass = tranType(tarClass.getType());
-        LLVMValueRef base = tranRValue(baseVar, llvmTarClass, true);
-
-        Optional<Integer> opfieldIndex = maps.getMemberFieldMap(jfield);
-        as.assertTrue(opfieldIndex.isPresent(), "The field {} should have been translated", jfield);
-        int index = opfieldIndex.get().intValue();
-        LLVMValueRef ptr = codeGen.buildGEP(
-                base,
-                List.of(
-                        codeGen.buildConstInt(codeGen.buildIntType(32), 0),
-                        codeGen.buildConstInt(codeGen.buildIntType(32), index)
-                )
-        );
-        return ptr;
-    }
-
-    public boolean isRootVirtualMethod(JMethod jmethod) {
-        if (!isVirtualMethod(jmethod)) {
-            return false;
-        }
-
-        JClass declClass = jmethod.getDeclaringClass();
-        Subsignature sig = jmethod.getSubsignature();
-        JClass curSuperClass = declClass.getSuperClass();
-        while (curSuperClass != null) {
-            JMethod smethod = curSuperClass.getDeclaredMethod(sig);
-            if (smethod != null) {
-                return false;
-            }
-            curSuperClass = curSuperClass.getSuperClass();
-        }
-        return true;
-    }
-
-    public boolean isVirtualMethod(JMethod jmethod) {
-        if (jmethod.isStatic() || jmethod.isConstructor()) {
-            return false;
-        }
-        JClass declClass = jmethod.getDeclaringClass();
-        Subsignature sig = jmethod.getSubsignature();
-        Collection<JClass> subClasses = classHierarchy.getAllSubclassesOf(declClass);
-        for (JClass subClass : subClasses) {
-            if (subClass.equals(declClass)) {
-                continue;
-            }
-            JMethod candidate = subClass.getDeclaredMethod(sig);
-            if (candidate != null) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    public LLVMValueRef resolveMethod(Var base, Subsignature sig) {
-        Type baseType = base.getType();
-        as.assertTrue(baseType instanceof ClassType, "The base var should be ClassType. Got {}.", baseType);
-        JClass baseClass = ((ClassType) baseType).getJClass();
-
-        JMethod declaredMethod = baseClass.getDeclaredMethod(sig);
-
-        // Check if it's a direct call:
-        if (!isVirtualMethod(declaredMethod)) {
-            return getOrTranMethod(declaredMethod);
-        }
-
-        // Otherwise, translate the virtual call by finding the root virtual method:
-        JClass curClass = baseClass;
-        Integer indexFuncPtr = null;
-        int steps = 0;
-        while (curClass != null) {
-            JMethod candidate = curClass.getDeclaredMethod(sig);
-            if (candidate != null) {
-                Optional<Integer> opIndex = maps.getVirtualMethodMap(candidate);
-                if (opIndex.isPresent()) {
-                    indexFuncPtr = opIndex.get();
-                    break;
-                }
-            }
-            curClass = curClass.getSuperClass();
-            steps += 1;
-        }
-        as.assertTrue(curClass != null && indexFuncPtr != null,
-                "Unexpected class hierarchy. The virtual method is not found. Base class: {}, sig: {}", baseClass, sig);
-        JClass tarClass = curClass;
-
-        LLVMValueRef llvmVar = tranRValue(base, tranType(baseType), false);
-        List<LLVMValueRef> indexes = new ArrayList<>();
-
-        for (int i = 0; i < steps + 1; i++) {
-            indexes.add(
-                    codeGen.buildConstInt(
-                            codeGen.buildIntType(32),
-                            0
-                    )
-            );
-        }
-        indexes.add(codeGen.buildConstInt(
-                codeGen.buildIntType(32),
-                indexFuncPtr.intValue()
-        ));
-
-        LLVMValueRef funcPtrPtr = codeGen.buildGEP(llvmVar, indexes);
-        LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
-        return funcPtr;
-    }
-
 
     /*
      * Translations from Java to LLVM
      */
 
-    public LLVMTypeRef tranClass(JClass jclass) {
+    public LLVMTypeRef tranClassDecl(JClass jclass) {
         String className = StringUtil.getClassName(jclass);
 
         LLVMTypeRef classType = codeGen.buildNamedStruct(className);
@@ -291,58 +210,50 @@ public class JellyFish extends ProgramAnalysis<Void> {
         String placeHolderValName = String.format("placeholder.%s", className);
         LLVMValueRef phValue = codeGen.addGlobalVariable(classType, placeHolderValName);
         LLVM.LLVMSetLinkage(phValue, LLVM.LLVMExternalLinkage);
-
-        // Update mapping
-        boolean ret = maps.setClassMap(jclass, classType);
-        as.assertTrue(ret, "The jclass {} has been duplicate translated.", jclass);
-
+        return classType;
         // After update: also translate the "relevant classes" by different types of reference
-        // 1. Field reference
-        Collection<JField> fields = jclass.getDeclaredFields();
-        for (JField field : fields) {
-            Type ftype = field.getType();
-            if (ftype instanceof ClassType) {
-                JClass fclass = ((ClassType) ftype).getJClass();
-                LLVMTypeRef fllvmClass = getOrTranClass(fclass);
-            }
-        }
-
-        // 2. class hierarchy reference
-        List<JClass> superClasses = new ArrayList<>();
-        JClass supClass = jclass.getSuperClass();
-        while (supClass != null) {
-            superClasses.add(supClass);
-            supClass = supClass.getSuperClass();
-        }
-        for (JClass superClass : superClasses) {
-            LLVMTypeRef llvmSClass = getOrTranClass(superClass);
-        }
-//        Collection<JClass> subClasses = classHierarchy.getAllSubclassesOf(jclass);
-//        for (JClass subClass: subClasses) {
-//            LLVMTypeRef llvmSClass = getOrTranClass(subClass);
+//        // 1. Field reference
+//        Collection<JField> fields = jclass.getDeclaredFields();
+//        for (JField field : fields) {
+//            Type ftype = field.getType();
+//            if (ftype instanceof ClassType) {
+//                JClass fclass = ((ClassType) ftype).getJClass();
+//                LLVMTypeRef fllvmClass = getOrTranClass(fclass);
+//            }
+//        }
+//
+//        // 2. Super class reference
+//        List<JClass> superClasses = new ArrayList<>();
+//        JClass supClass = jclass.getSuperClass();
+//        while (supClass != null) {
+//            superClasses.add(supClass);
+//            supClass = supClass.getSuperClass();
+//        }
+//        for (JClass superClass : superClasses) {
+//            LLVMTypeRef llvmSClass = getOrTranClass(superClass);
+//        }
+//
+//        // 3. Interface reference
+//        Collection<JClass> jinterfaces = jclass.getInterfaces();
+//        for (JClass jinterface : jinterfaces) {
+//            LLVMTypeRef llvmInterface = getOrTranClass(jinterface);
 //        }
 
-        // 3. Interface reference
-        Collection<JClass> jinterfaces = jclass.getInterfaces();
-        for (JClass jinterface : jinterfaces) {
-            LLVMTypeRef llvmInterface = getOrTranClass(jinterface);
-        }
-        return classType;
     }
 
     public void tranClassFields(JClass jclass) {
         Optional<LLVMTypeRef> opllvmClass = maps.getClassMap(jclass);
         as.assertTrue(opllvmClass.isPresent(), "The class declaration of {} should have been translated.", jclass);
-        LLVMTypeRef llvmClass = maps.getClassMap(jclass).get();
+        LLVMTypeRef llvmClass = opllvmClass.get();
 
         JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
-        LLVMTypeRef llvmObjClass = tranType(objClass.getType());
+        LLVMTypeRef llvmObjClass = tranType(objClass.getType(), ClassDepID.DEP_DECL);
 
         List<LLVMTypeRef> fieldTypes = new ArrayList<>();
         // 1. "super field"
         JClass sclass = jclass.getSuperClass();
         if (sclass != null) {
-            LLVMTypeRef llvmSuperClass = tranTypeAlloc(sclass.getType());
+            LLVMTypeRef llvmSuperClass = tranTypeAlloc(sclass.getType(), ClassDepID.DEP_DECL);
             fieldTypes.add(llvmSuperClass);
         } else {
             fieldTypes.add(llvmObjClass);
@@ -369,7 +280,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         for (JField field : fields) {
             String fieldName = field.getName();
             Type ftype = field.getType();
-            LLVMTypeRef fllvmType = tranType(ftype);
+            LLVMTypeRef fllvmType = tranType(ftype, ClassDepID.DEP_DECL);
             if (field.isStatic()) {
                 String staticFieldName = StringUtil.getStaticFieldName(jclass, field);
                 LLVMValueRef fieldVar = codeGen.addGlobalVariable(fllvmType, staticFieldName);
@@ -386,12 +297,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return;
     }
 
-    public LLVMTypeRef tranTypeAlloc(Type jType) {
+    public LLVMTypeRef tranTypeAlloc(Type jType, ClassDepID dep) {
         /*
          * Translate this type for allocation.
          * So the reference type will be not be transformed to pointer.
          */
-        LLVMTypeRef type1 = tranType(jType);
+        LLVMTypeRef type1 = tranType(jType, dep);
         if (jType instanceof ReferenceType) {
             as.assertTrue(LLVM.LLVMGetTypeKind(type1) == LLVM.LLVMPointerTypeKind, "The type should be a pointer type. Got {}", getLLVMStr(type1));
             return LLVM.LLVMGetElementType(type1);
@@ -405,20 +316,20 @@ public class JellyFish extends ProgramAnalysis<Void> {
         List<LLVMTypeRef> paramTypes = new ArrayList<>();
         if (!jmethod.isStatic()) {
             ClassType classType = jclass.getType();
-            LLVMTypeRef llvmClassType = tranType(classType);
+            LLVMTypeRef llvmClassType = tranType(classType, ClassDepID.DEP_DECL);
             paramTypes.add(llvmClassType);
         }
         for (Type jType : jmethod.getParamTypes()) {
-            LLVMTypeRef type = tranType(jType);
+            LLVMTypeRef type = tranType(jType, ClassDepID.DEP_DECL);
             paramTypes.add(type);
         }
         Type jretType = jmethod.getReturnType();
-        LLVMTypeRef retType = tranType(jretType);
+        LLVMTypeRef retType = tranType(jretType, ClassDepID.DEP_DECL);
         LLVMTypeRef funcType = codeGen.buildFunctionType(retType, paramTypes);
         return funcType;
     }
 
-    public LLVMTypeRef tranType(Type jType) {
+    public LLVMTypeRef tranType(Type jType, ClassDepID dep) {
         /*
          * Translate the type for variable typing.
          * So the reference type will be automatically transformed to pointer type.
@@ -459,7 +370,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 Type jBaseType = ((ArrayType) jType).baseType();
                 int dimension = ((ArrayType) jType).dimensions();
 
-                LLVMTypeRef baseType = this.tranType(jBaseType);
+                LLVMTypeRef baseType = this.tranType(jBaseType, dep);
                 int arraySize = 0; // in java, array sizes are unknown.
 
                 LLVMTypeRef curArrayPtrType = codeGen.buildPointerType(codeGen.buildArrayType(baseType, arraySize));
@@ -469,7 +380,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 return curArrayPtrType;
             } else if (jType instanceof ClassType) {
                 JClass jclass = ((ClassType) jType).getJClass();
-                LLVMTypeRef llvmStruct = getOrTranClass(jclass);
+                as.assertTrue(dep != null, "The dep should be specified. Got null.");
+                LLVMTypeRef llvmStruct = getOrTranClass(jclass, dep);
                 LLVMTypeRef llvmStructPtr = codeGen.buildPointerType(llvmStruct);
                 return llvmStructPtr;
             } else if (jType instanceof NullType) {
@@ -482,7 +394,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return null;
     }
 
-    public LLVMValueRef tranMethod(JMethod jmethod) {
+    public LLVMValueRef tranMethodDecl(JMethod jmethod) {
         JClass jclass = jmethod.getDeclaringClass();
         String methodName = StringUtil.getMethodName(jclass, jmethod);
         LLVMTypeRef funcType = tranMethodType(jmethod);
@@ -496,14 +408,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     public void tranMethodBody(JMethod jmethod) {
         // TODO: enable all methods after the tool is mature
-        if (!jmethod.getDeclaringClass().isApplication()) {
-            // Debug use: Skip non application class
-            return;
-        }
-        if (!jmethod.getName().equals("<clinit>")) {
-            // Debug use: Skip non-class-init method
-            return;
-        }
+//        if (!jmethod.getName().equals("<clinit>")) {
+//            // Debug use: Skip non-class-init method
+//            return;
+//        }
 
         logger.info("*Method: {}. In Class: {}", jmethod.getName(), jmethod.getDeclaringClass());
         Optional<LLVMValueRef> opllvmFunc = maps.getMethodMap(jmethod);
@@ -520,7 +428,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         for (Var var : vars) {
             Type jvarType = var.getType();
             if (jvarType instanceof NullType) continue;
-            LLVMTypeRef llvmVarType = tranType(jvarType);
+            LLVMTypeRef llvmVarType = tranType(jvarType, ClassDepID.DEP_FIELDS);
             String llvmVarName = StringUtil.getVarNameAsPtr(var);
             LLVMValueRef alloca = codeGen.buildAlloca(llvmVarType, llvmVarName);
             boolean ret = maps.setVarMap(var, alloca);
@@ -749,7 +657,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 return resInsts;
             } else {
                 Type jretType = jmethod.getReturnType();
-                LLVMTypeRef retType = tranType(jretType);
+                LLVMTypeRef retType = tranType(jretType, ClassDepID.DEP_FIELDS);
                 as.assertTrue(LLVM.LLVMGetTypeKind(retType) != LLVM.LLVMVoidTypeKind, "The none-void return stmt {} should not return void.", jstmt);
                 LLVMValueRef retVal = tranRValue(var, retType, false);
                 LLVMValueRef ret = codeGen.buildRet(Optional.of(retVal));
@@ -763,7 +671,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         } else if (jstmt instanceof Monitor) {
             Var obj = ((Monitor) jstmt).getObjectRef();
             JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
-            LLVMTypeRef objectType = tranType(objClass.getType());
+            LLVMTypeRef objectType = tranType(objClass.getType(), ClassDepID.DEP_FIELDS);
 
             LLVMValueRef llvmObj = tranRValue(obj, objectType, true);
 
@@ -832,13 +740,13 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 if (jexp instanceof IntegerLiteral) { // Interface
                     if (jexp instanceof IntLiteral) {
                         Type jIntType = jexp.getType();
-                        LLVMTypeRef llvmIntType = tranType(jIntType);
+                        LLVMTypeRef llvmIntType = tranType(jIntType, null);
                         long intNumLong = ((IntLiteral) jexp).getNumber().longValue();
                         LLVMValueRef constInt = codeGen.buildConstInt(llvmIntType, intNumLong);
                         return constInt;
                     } else if (jexp instanceof LongLiteral) {
                         Type jlongType = jexp.getType();
-                        LLVMTypeRef llvmLongType = tranType(jlongType);
+                        LLVMTypeRef llvmLongType = tranType(jlongType, null);
                         long longNum = ((LongLiteral) jexp).getValue();
                         LLVMValueRef constInt = codeGen.buildConstInt(llvmLongType, longNum);
                         return constInt;
@@ -846,13 +754,13 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 } else if (jexp instanceof FloatingPointLiteral) { // Interface
                     if (jexp instanceof FloatLiteral) {
                         Type jfloatType = jexp.getType();
-                        LLVMTypeRef llvmFloatType = tranType(jfloatType);
+                        LLVMTypeRef llvmFloatType = tranType(jfloatType, null);
                         double floatNumDouble = ((FloatLiteral) jexp).getNumber().doubleValue();
                         LLVMValueRef constReal = codeGen.buildConstReal(llvmFloatType, floatNumDouble);
                         return constReal;
                     } else if (jexp instanceof DoubleLiteral) {
                         Type jdoubleType = jexp.getType();
-                        LLVMTypeRef llvmDoubleType = tranType(jdoubleType);
+                        LLVMTypeRef llvmDoubleType = tranType(jdoubleType, null);
                         double doubleNum = ((DoubleLiteral) jexp).getValue();
                         LLVMValueRef constReal = codeGen.buildConstReal(llvmDoubleType, doubleNum);
                         return constReal;
@@ -874,22 +782,22 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     return llvmStrVal;
                 } else if (jexp instanceof ClassLiteral) {
                     JClass jclassClass = world.getClassHierarchy().getClass("java.lang.Class");
-                    LLVMTypeRef javaClassType = tranType(jclassClass.getType());
+                    LLVMTypeRef javaClassType = tranType(jclassClass.getType(), ClassDepID.DEP_FIELDS);
                     Type theClass = ((ClassLiteral) jexp).getTypeValue();
-                    LLVMTypeRef classType = tranType(theClass);
+                    LLVMTypeRef classType = tranType(theClass, ClassDepID.DEP_FIELDS);
                     LLVMValueRef classIntrinsic = codeGen.buildClassIntrinsic(classType, javaClassType);
                     return classIntrinsic;
                 } else if (jexp instanceof MethodHandle) {
                     // TODO:
                 } else if (jexp instanceof MethodType) {
-                    JClass jmethodTypeClass = world.getClassHierarchy().getClass("java.lang.Class");
-                    LLVMTypeRef javaMethodTypeClassType = tranType(jmethodTypeClass.getType());
+                    JClass jmethodTypeClass = world.getClassHierarchy().getClass("java.invoke.MethodType");
+                    LLVMTypeRef javaMethodTypeClassType = tranType(jmethodTypeClass.getType(), ClassDepID.DEP_FIELDS);
                     Type jretType = ((MethodType) jexp).getReturnType();
                     List<Type> jparamTypes = ((MethodType) jexp).getParamTypes();
-                    LLVMTypeRef retType = tranType(jretType);
+                    LLVMTypeRef retType = tranType(jretType, ClassDepID.DEP_FIELDS);
                     List<LLVMTypeRef> paramTypes = new ArrayList<>();
                     for (Type jparamType : jparamTypes) {
-                        LLVMTypeRef paramType = tranType(jparamType);
+                        LLVMTypeRef paramType = tranType(jparamType, ClassDepID.DEP_FIELDS);
                         paramTypes.add(paramType);
                     }
                     LLVMValueRef methodType = codeGen.buildMethodType(retType, paramTypes, javaMethodTypeClassType);
@@ -931,7 +839,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         } else if (jexp instanceof BinaryExp) { // Interface
             Type jresType = jexp.getType();
-            LLVMTypeRef resType = tranType(jresType);
+            LLVMTypeRef resType = tranType(jresType, null);
 
             Var left = ((BinaryExp) jexp).getOperand1();
             Var right = ((BinaryExp) jexp).getOperand2();
@@ -1099,16 +1007,16 @@ public class JellyFish extends ProgramAnalysis<Void> {
         } else if (jexp instanceof NewExp) { // Interface
             if (jexp instanceof NewInstance) {
                 Type objType = jexp.getType();
-                LLVMTypeRef llvmObjType = tranTypeAlloc(objType);
+                LLVMTypeRef llvmObjType = tranTypeAlloc(objType, ClassDepID.DEP_FIELDS);
                 LLVMValueRef object = codeGen.buildMalloc(llvmObjType);
                 return object;
             } else if (jexp instanceof NewArray) {
                 ArrayType jarrayType = ((NewArray) jexp).getType();
-                LLVMTypeRef newedType = tranType(jarrayType);
+                LLVMTypeRef newedType = tranType(jarrayType, ClassDepID.DEP_FIELDS);
                 Type jbaseType = jarrayType.baseType();
                 as.assertFalse(jbaseType instanceof ArrayType, "Unexpected base type {}", jbaseType);
 
-                LLVMTypeRef llvmBaseType = tranTypeAlloc(jbaseType);
+                LLVMTypeRef llvmBaseType = tranTypeAlloc(jbaseType, ClassDepID.DEP_FIELDS);
                 LLVMValueRef llvmBaseSizeConst = codeGen.buildSizeOf(llvmBaseType);
 
                 Var lengthVar = ((NewArray) jexp).getLength();
@@ -1118,11 +1026,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
             } else if (jexp instanceof NewMultiArray) {
                 ArrayType jarrayType = ((NewMultiArray) jexp).getType();
-                LLVMTypeRef newedType = tranType(jarrayType);
+                LLVMTypeRef newedType = tranType(jarrayType, ClassDepID.DEP_FIELDS);
                 Type jbaseType = jarrayType.baseType();
                 as.assertFalse(jbaseType instanceof ArrayType, "Unexpected base type {}", jbaseType);
 
-                LLVMTypeRef llvmBaseType = tranTypeAlloc(jbaseType);
+                LLVMTypeRef llvmBaseType = tranTypeAlloc(jbaseType, ClassDepID.DEP_FIELDS);
                 LLVMValueRef llvmBaseSizeConst = codeGen.buildSizeOf(llvmBaseType);
 
                 List<Var> lengthVars = ((NewMultiArray) jexp).getLengths();
@@ -1139,7 +1047,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 MethodRef methodRef = ((InvokeStatic) jexp).getMethodRef();
                 JMethod jcallee = methodRef.resolveNullable();
                 as.assertTrue(jcallee != null, "Invokestatic must can be resolved.");
-                LLVMValueRef callee = getOrTranMethod(jcallee);
+                LLVMValueRef callee = getOrTranMethodDecl(jcallee);
                 as.assertTrue(LLVM.LLVMCountParams(callee) == ((InvokeStatic) jexp).getArgCount(),
                         "Argument number doesn't match. LLVM func: {}, static invoke: {}", getLLVMStr(callee), jexp);
                 List<LLVMValueRef> args = new ArrayList<>();
@@ -1216,7 +1124,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             Var indexVar = ((ArrayAccess) jexp).getIndex();
 
             Type jelementType = ((ArrayType) baseVar.getType()).elementType();   // :: T2
-            LLVMTypeRef elementType = tranType(jelementType);   // ::F2
+            LLVMTypeRef elementType = tranType(jelementType, ClassDepID.DEP_FIELDS);   // ::F2
 
             LLVMValueRef base = tranRValue(baseVar, codeGen.buildPointerType(codeGen.buildArrayType(elementType, 0)), true);     // ::F1
 
@@ -1229,15 +1137,15 @@ public class JellyFish extends ProgramAnalysis<Void> {
         } else if (jexp instanceof CastExp) {
             Var var = ((CastExp) jexp).getValue();
             Type castType = ((CastExp) jexp).getCastType();
-            LLVMTypeRef targetType = tranType(castType);
+            LLVMTypeRef targetType = tranType(castType, ClassDepID.DEP_FIELDS);
             LLVMValueRef llvmVal = tranRValue(var, targetType, true);
             return llvmVal;
         } else if (jexp instanceof InstanceOfExp) {
             JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
-            LLVMTypeRef objectType = tranType(objClass.getType());
+            LLVMTypeRef objectType = tranType(objClass.getType(), ClassDepID.DEP_FIELDS);
 
             Type jcheckType = ((InstanceOfExp) jexp).getCheckedType();
-            LLVMTypeRef checkType = tranType(jcheckType);
+            LLVMTypeRef checkType = tranType(jcheckType, ClassDepID.DEP_FIELDS);
 
             Var var = ((InstanceOfExp) jexp).getValue();
             LLVMValueRef checkValue = tranRValue(var, objectType, true);
@@ -1293,7 +1201,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             Var indexVar = ((ArrayAccess) jexp).getIndex();
 
             Type jelementType = ((ArrayType) baseVar.getType()).elementType();   // :: T2
-            LLVMTypeRef elementType = tranType(jelementType);   // ::F2
+            LLVMTypeRef elementType = tranType(jelementType, ClassDepID.DEP_FIELDS);   // ::F2
 
             LLVMValueRef base = tranRValue(baseVar, codeGen.buildPointerType(codeGen.buildArrayType(elementType, 0)), true);   // ::F1
 
@@ -1305,6 +1213,123 @@ public class JellyFish extends ProgramAnalysis<Void> {
         }
         as.unimplemented();
         return null;
+    }
+
+    /*
+     * Resolution of OOP features
+     */
+    public LLVMValueRef resolveMemberField(JField jfield, Var baseVar) {
+        Type baseType = baseVar.getType();
+        as.assertTrue(baseType instanceof ClassType, "The base var {} should be of classType", baseVar);
+
+        JClass baseClass = ((ClassType) baseType).getJClass();
+        JClass tarClass = jfield.getDeclaringClass();
+        as.assertTrue(classHierarchy.isSubclass(tarClass, baseClass), "target class should be super of base. Target: {}. Base: {}", tarClass, baseClass);
+
+        LLVMTypeRef llvmTarClass = tranType(tarClass.getType(), ClassDepID.DEP_FIELDS);
+        LLVMValueRef base = tranRValue(baseVar, llvmTarClass, true);
+
+        Optional<Integer> opfieldIndex = maps.getMemberFieldMap(jfield);
+        as.assertTrue(opfieldIndex.isPresent(), "The field {} should have been translated", jfield);
+        int index = opfieldIndex.get().intValue();
+        LLVMValueRef ptr = codeGen.buildGEP(
+                base,
+                List.of(
+                        codeGen.buildConstInt(codeGen.buildIntType(32), 0),
+                        codeGen.buildConstInt(codeGen.buildIntType(32), index)
+                )
+        );
+        return ptr;
+    }
+
+    public boolean isRootVirtualMethod(JMethod jmethod) {
+        if (!isVirtualMethod(jmethod)) {
+            return false;
+        }
+
+        JClass declClass = jmethod.getDeclaringClass();
+        Subsignature sig = jmethod.getSubsignature();
+        JClass curSuperClass = declClass.getSuperClass();
+        while (curSuperClass != null) {
+            JMethod smethod = curSuperClass.getDeclaredMethod(sig);
+            if (smethod != null) {
+                return false;
+            }
+            curSuperClass = curSuperClass.getSuperClass();
+        }
+        return true;
+    }
+
+    public boolean isVirtualMethod(JMethod jmethod) {
+        if (jmethod.isStatic() || jmethod.isConstructor()) {
+            return false;
+        }
+        JClass declClass = jmethod.getDeclaringClass();
+        Subsignature sig = jmethod.getSubsignature();
+        Collection<JClass> subClasses = classHierarchy.getAllSubclassesOf(declClass);
+        for (JClass subClass : subClasses) {
+            if (subClass.equals(declClass)) {
+                continue;
+            }
+            JMethod candidate = subClass.getDeclaredMethod(sig);
+            if (candidate != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public LLVMValueRef resolveMethod(Var base, Subsignature sig) {
+        Type baseType = base.getType();
+        as.assertTrue(baseType instanceof ClassType, "The base var should be ClassType. Got {}.", baseType);
+        JClass baseClass = ((ClassType) baseType).getJClass();
+
+        JMethod declaredMethod = baseClass.getDeclaredMethod(sig);
+
+        // Check if it's a direct call:
+        if (!isVirtualMethod(declaredMethod)) {
+            return getOrTranMethodDecl(declaredMethod);
+        }
+
+        // Otherwise, translate the virtual call by finding the root virtual method:
+        JClass curClass = baseClass;
+        Integer indexFuncPtr = null;
+        int steps = 0;
+        while (curClass != null) {
+            JMethod candidate = curClass.getDeclaredMethod(sig);
+            if (candidate != null) {
+                Optional<Integer> opIndex = maps.getVirtualMethodMap(candidate);
+                if (opIndex.isPresent()) {
+                    indexFuncPtr = opIndex.get();
+                    break;
+                }
+            }
+            curClass = curClass.getSuperClass();
+            steps += 1;
+        }
+        as.assertTrue(curClass != null && indexFuncPtr != null,
+                "Unexpected class hierarchy. The virtual method is not found. Base class: {}, sig: {}", baseClass, sig);
+        JClass tarClass = curClass;
+
+        LLVMValueRef llvmVar = tranRValue(base, tranType(baseType, ClassDepID.DEP_METHOD_DECL), false);
+        List<LLVMValueRef> indexes = new ArrayList<>();
+
+        for (int i = 0; i < steps + 1; i++) {
+            indexes.add(
+                    codeGen.buildConstInt(
+                            codeGen.buildIntType(32),
+                            0
+                    )
+            );
+        }
+        indexes.add(codeGen.buildConstInt(
+                codeGen.buildIntType(32),
+                indexFuncPtr.intValue()
+        ));
+
+        LLVMValueRef funcPtrPtr = codeGen.buildGEP(llvmVar, indexes);
+        LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
+        return funcPtr;
     }
 
 }

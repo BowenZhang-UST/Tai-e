@@ -5,7 +5,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
-import pascal.taie.ir.exp.Exp;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.classes.JClass;
@@ -19,11 +18,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 
+import prism.jellyfish.JellyFish.ClassDepID;
+
 public class Mappings {
     private static final Logger logger = LogManager.getLogger(Mappings.class);
     private static final AssertUtil as = new AssertUtil(logger);
 
     public HashMap<JClass, LLVMTypeRef> classMap;
+    public HashMap<JClass, ClassDepID> classStatusMap;
     public HashMap<JMethod, LLVMValueRef> methodMap;
     public HashMap<Var, LLVMValueRef> varMap;
     public HashMap<JField, LLVMValueRef> staticFieldMap;
@@ -35,6 +37,7 @@ public class Mappings {
 
     public Mappings() {
         this.classMap = new HashMap<>();
+        this.classStatusMap = new HashMap<>();
         this.methodMap = new HashMap<>();
         this.varMap = new HashMap<>();
         this.staticFieldMap = new HashMap<>();
@@ -78,6 +81,26 @@ public class Mappings {
     public List<JClass> getAllClasses() {
         return getAllKeys(classMap);
     }
+
+    /*
+     * Class status map
+     */
+    public boolean setClassStatusMap(JClass jclass, ClassDepID id) {
+        Optional<ClassDepID> oldID = getFromMap(classStatusMap, jclass);
+        if (oldID.isPresent()) {
+            as.assertTrue(oldID.get().getOrd() < id.getOrd(), "The status should be monotone. Old: {}, New: {}", oldID.get(), id);
+        } else {
+            as.assertTrue(id == ClassDepID.DEP_DECL, "The first update should be DEP_DECL. Got {}.", id);
+        }
+
+        classStatusMap.put(jclass, id);
+        return true;
+    }
+
+    public Optional<ClassDepID> getClassStatusMap(JClass jclass) {
+        return getFromMap(classStatusMap, jclass);
+    }
+
 
     /*
      * Method map
