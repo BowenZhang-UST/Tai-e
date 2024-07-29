@@ -15,6 +15,7 @@ import pascal.taie.language.type.*;
 import pascal.taie.ir.proginfo.FieldRef;
 import pascal.taie.ir.proginfo.MethodRef;
 import pascal.taie.config.AnalysisConfig;
+import pascal.taie.util.AnalysisException;
 import pascal.taie.util.collection.Pair;
 
 import org.apache.logging.log4j.Logger;
@@ -49,11 +50,13 @@ public class JellyFish extends ProgramAnalysis<Void> {
     ClassHierarchy classHierarchy;
     LLVMCodeGen codeGen;
     Mappings maps;
+    AnalysisConfig config;
 
 
     public JellyFish(AnalysisConfig config) {
         super(config);
         logger.info("Jellyfish is a transpiler from Tai-e IR to LLVM IR.");
+        this.config = config;
         this.world = World.get();
         this.classHierarchy = world.getClassHierarchy();
         this.codeGen = new LLVMCodeGen();
@@ -62,17 +65,16 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     @Override
     public Void analyze() {
-        List<JClass> jclasses = classHierarchy.applicationClasses().toList();
+//        List<JClass> jclasses = classHierarchy.applicationClasses().toList();
+        List<JClass> jclasses = classHierarchy.allClasses().toList();
         for (JClass jclass : jclasses) {
             String className = jclass.getName();
             String moduleName = jclass.getModuleName();
             String simpleName = jclass.getSimpleName();
             logger.info("Init class: name: {}, module name: {}, simple name:{}", className, moduleName, simpleName);
-
             // Class
             LLVMTypeRef llvmClass = getOrTranClass(jclass, ClassDepID.DEP_METHOD_DEF);
         }
-
         codeGen.generate();
         return null;
     }
@@ -106,9 +108,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             theClass = existClass;
 
             curDep = maps.getClassStatusMap(jclass).get();
-            logger.info("Tran Class (Exist): {} {}=>{}", jclass, curDep, dep);
         } else {
-            logger.info("Tran Class (New): {} =>{}", jclass, dep);
             LLVMTypeRef newClass = this.tranClassDecl(jclass);
             boolean ret = maps.setClassMap(jclass, newClass);
             as.assertTrue(ret, "The jclass {} has been duplicate translated.", jclass);
@@ -121,21 +121,17 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
         for (int i = curDep.getOrd() + 1; i <= dep.getOrd(); i++) {
             if (i == ClassDepID.DEP_DECL.getOrd()) {
-                logger.info("Handle DEP_DECL: {}", jclass);
                 continue;
             } else if (i == ClassDepID.DEP_FIELDS.getOrd()) {
-                logger.info("Handle, DEP_FIELDS: {}", jclass);
                 this.tranClassFields(jclass);
                 maps.setClassStatusMap(jclass, ClassDepID.DEP_FIELDS);
             } else if (i == ClassDepID.DEP_METHOD_DECL.getOrd()) {
-                logger.info("Handle, DEP_METHOD_DECL: {}", jclass);
                 Collection<JMethod> methods = jclass.getDeclaredMethods();
                 for (JMethod jmethod : methods) {
                     LLVMValueRef llvmMethod = getOrTranMethodDecl(jmethod);
                 }
                 maps.setClassStatusMap(jclass, ClassDepID.DEP_METHOD_DECL);
             } else if (i == ClassDepID.DEP_METHOD_DEF.getOrd()) {
-                logger.info("Handle, DEP_METHOD_DEF: {}", jclass);
                 Collection<JMethod> methods = jclass.getDeclaredMethods();
                 for (JMethod jmethod : methods) {
                     this.tranMethodBody(jmethod);
@@ -418,8 +414,23 @@ public class JellyFish extends ProgramAnalysis<Void> {
         as.assertTrue(opllvmFunc.isPresent(), "The decl of jmethod {} should have be translated", jmethod);
         LLVMValueRef llvmFunc = opllvmFunc.get();
 
-        IR ir = jmethod.getIR();
-        CFG<Stmt> cfg = ir.getResult(CFGBuilder.ID);
+        IR ir;
+        CFG<Stmt> cfg;
+        try {
+            ir = jmethod.getIR();
+            cfg = ir.getResult(CFGBuilder.ID);
+
+            if (cfg == null) {
+                maps.clearVarMap();
+                maps.clearStmtBlockMap();
+                return;
+            }
+        } catch (AnalysisException e) {
+            logger.info("Error: {}", e.getMessage());
+            maps.clearVarMap();
+            maps.clearStmtBlockMap();
+            return;
+        }
 
         // We create an entry block contains all Tai-e variables
         LLVMBasicBlockRef entryBlock = codeGen.addBasicBlock(llvmFunc, "entry");
@@ -434,6 +445,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             boolean ret = maps.setVarMap(var, alloca);
             as.assertTrue(ret, "The var {} has been duplicate translated.", var);
         }
+
 
         // We allocate an exit block for the exit stmt in CFG, which is added by Tai-e.
         Stmt exitStmt = cfg.getExit();
@@ -789,6 +801,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     return classIntrinsic;
                 } else if (jexp instanceof MethodHandle) {
                     // TODO:
+                    as.unreachable("It's unreachable");
                 } else if (jexp instanceof MethodType) {
                     JClass jmethodTypeClass = world.getClassHierarchy().getClass("java.invoke.MethodType");
                     LLVMTypeRef javaMethodTypeClassType = tranType(jmethodTypeClass.getType(), ClassDepID.DEP_FIELDS);
@@ -911,12 +924,9 @@ public class JellyFish extends ProgramAnalysis<Void> {
                  *     T1 = T2
                  *     T = int
                  */
-                Optional<LLVMValueRef> opleftVal = tranRValue(left);
-                Optional<LLVMValueRef> oprightVal = tranRValue(right);
-                LLVMTypeRef comparisonDefaultType = codeGen.buildIntType(32); // int
-                Pair<LLVMValueRef, LLVMValueRef> unifiedOperands = codeGen.unifyValues(opleftVal, oprightVal, comparisonDefaultType);
-                LLVMValueRef leftVal = unifiedOperands.first();
-                LLVMValueRef rightVal = unifiedOperands.second();
+                LLVMTypeRef comparisonDefaultType = codeGen.buildIntType(32);
+                LLVMValueRef leftVal = tranRValue(left, comparisonDefaultType);
+                LLVMValueRef rightVal = tranRValue(right, comparisonDefaultType);
 
 
                 ComparisonExp.Op op = ((ComparisonExp) jexp).getOperator();
@@ -948,12 +958,9 @@ public class JellyFish extends ProgramAnalysis<Void> {
                  *     T = bool
                  */
 
-                Optional<LLVMValueRef> opleftVal = tranRValue(left);
-                Optional<LLVMValueRef> oprightVal = tranRValue(right);
-                LLVMTypeRef conditionDefaultType = codeGen.buildIntType(32); // int
-                Pair<LLVMValueRef, LLVMValueRef> unifiedOperands = codeGen.unifyValues(opleftVal, oprightVal, conditionDefaultType);
-                LLVMValueRef leftVal = unifiedOperands.first();
-                LLVMValueRef rightVal = unifiedOperands.second();
+                LLVMTypeRef conditionDefaultType = codeGen.buildIntType(32);
+                LLVMValueRef leftVal = tranRValue(left, conditionDefaultType);
+                LLVMValueRef rightVal = tranRValue(right, conditionDefaultType);
 
                 ConditionExp.Op op = ((ConditionExp) jexp).getOperator();
 
@@ -1062,7 +1069,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMValueRef call = codeGen.buildCall(callee, args);
                 return call;
             } else if (jexp instanceof InvokeDynamic) {
-                // TODO:
+                // TODO: really implement InvokeDynamic
+                Type jresType = jexp.getType();
+                LLVMTypeRef resType = tranType(jresType, ClassDepID.DEP_FIELDS);
+                LLVMValueRef res = codeGen.buildNull(resType);
+                return res;
             } else if (jexp instanceof InvokeInstanceExp) { // Abstract
                 Var baseVar = ((InvokeInstanceExp) jexp).getBase();
                 MethodRef methodRef = ((InvokeInstanceExp) jexp).getMethodRef();

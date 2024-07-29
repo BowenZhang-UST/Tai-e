@@ -246,10 +246,6 @@ public class LLVMCodeGen {
         int leftOpKind = LLVM.LLVMGetTypeKind(lType);
         int rightOpKind = LLVM.LLVMGetTypeKind(rType);
 
-        LLVMTypeRef operandType = lType.equals(rType) ? lType : null;
-        Integer operandKind = lType.equals(rType) ? leftOpKind : null;
-
-
         int resKind = LLVM.LLVMGetTypeKind(resType);
 
         if (op.equals("+")) {
@@ -320,139 +316,176 @@ public class LLVMCodeGen {
             LLVMValueRef xor = LLVM.LLVMBuildXor(builder, left, right, "xor");
             return xor;
         } else if (op.equals("==")) {
-            as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             if (operandKind == LLVM.LLVMIntegerTypeKind) {
-                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntEQ, left, right, "inteq");
+                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntEQ, left, right2, "inteq");
                 return icmp;
             } else if (operandKind == LLVM.LLVMFloatTypeKind || operandKind == LLVM.LLVMDoubleTypeKind) {
-                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOEQ, left, right, "realeq");
+                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOEQ, left, right2, "realeq");
                 return fcmp;
             } else if (operandKind == LLVM.LLVMPointerTypeKind) {
-                LLVMValueRef ptreq = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntEQ, left, right, "ptreq");
+                LLVMValueRef ptreq = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntEQ, left, right2, "ptreq");
                 return ptreq;
             } else {
                 as.unreachable("Unexpected operand type: {}. Left val: {}. Right val: {}",
-                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right));
+                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right2));
                 return null;
             }
         } else if (op.equals(">")) {
-            as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             if (operandKind == LLVM.LLVMIntegerTypeKind) {
-                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSGT, left, right, "intgt");
+                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSGT, left, right2, "intgt");
                 return icmp;
             } else if (operandKind == LLVM.LLVMFloatTypeKind || operandKind == LLVM.LLVMDoubleTypeKind) {
-                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOGT, left, right, "realgt");
+                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOGT, left, right2, "realgt");
                 return fcmp;
             } else {
                 as.unreachable("Unexpected operand type: {}. Left val: {}. Right val: {}",
-                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right));
+                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right2));
                 return null;
             }
         } else if (op.equals("<")) {
-            as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             if (operandKind == LLVM.LLVMIntegerTypeKind) {
-                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSLT, left, right, "intlt");
+                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSLT, left, right2, "intlt");
                 return icmp;
             } else if (operandKind == LLVM.LLVMFloatTypeKind || operandKind == LLVM.LLVMDoubleTypeKind) {
-                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOLT, left, right, "reallt");
+                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOLT, left, right2, "reallt");
                 return fcmp;
             } else {
                 as.unreachable("Unexpected operand type: {}. Left val: {}. Right val: {}",
-                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right));
+                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right2));
                 return null;
             }
         } else if (op.equals("!=")) {
-            as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             if (operandKind == LLVM.LLVMIntegerTypeKind) {
-                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntNE, left, right, "intne");
+                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntNE, left, right2, "intne");
                 return icmp;
             } else if (operandKind == LLVM.LLVMFloatTypeKind || operandKind == LLVM.LLVMDoubleTypeKind) {
-                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealONE, left, right, "realne");
+                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealONE, left, right2, "realne");
                 return fcmp;
             } else {
                 as.unreachable("Unexpected operand type: {}. Left val: {}. Right val: {}",
-                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right));
+                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right2));
                 return null;
             }
         } else if (op.equals("<=")) {
-            as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             if (operandKind == LLVM.LLVMIntegerTypeKind) {
-                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSLE, left, right, "intle");
+                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSLE, left, right2, "intle");
                 return icmp;
             } else if (operandKind == LLVM.LLVMFloatTypeKind || operandKind == LLVM.LLVMDoubleTypeKind) {
-                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOLE, left, right, "realle");
+                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOLE, left, right2, "realle");
                 return fcmp;
             } else {
                 as.unreachable("Unexpected operand type: {}. Left val: {}. Right val: {}",
-                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right));
+                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right2));
                 return null;
             }
         } else if (op.equals(">=")) {
-            as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             if (operandKind == LLVM.LLVMIntegerTypeKind) {
-                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSGE, left, right, "intge");
+                LLVMValueRef icmp = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSGE, left, right2, "intge");
                 return icmp;
             } else if (operandKind == LLVM.LLVMFloatTypeKind || operandKind == LLVM.LLVMDoubleTypeKind) {
-                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOGE, left, right, "realge");
+                LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOGE, left, right2, "realge");
                 return fcmp;
             } else {
                 as.unreachable("Unexpected operand type: {}. Left val: {}. Right val: {}",
-                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right));
+                        getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right2));
                 return null;
             }
         } else if (op.equals("cmp")) {
-            as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             as.assertTrue(operandKind == LLVM.LLVMIntegerTypeKind,
                     "Typing: CMP should receive integer type. Got: {}. Left val: {}. Right val: {}",
-                    getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right));
+                    getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right2));
             /*
              * Trans: cmp A B => (icmp ge A B) - (icmp le A B)
              */
-            LLVMValueRef icmpge = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSGE, left, right, "cmp");
-            LLVMValueRef icmple = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSLE, left, right, "cmp");
+            LLVMValueRef icmpge = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSGE, left, right2, "cmp");
+            LLVMValueRef icmple = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntSLE, left, right2, "cmp");
 
             LLVMValueRef sub = LLVM.LLVMBuildSub(builder, buildTypeCast(icmpge, resType), buildTypeCast(icmple, resType), "cmp");
             return sub;
         } else if (op.equals("cmpg")) {
-            as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             as.assertTrue(operandKind == LLVM.LLVMFloatTypeKind || operandKind == LLVM.LLVMDoubleTypeKind,
                     "Typing: CMPG should receive real type. Got: {}. Left val: {}. Right val: {}",
-                    getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right));
+                    getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right2));
             /*
              * Trans: cmpg A B => (fcmp uge A B) - (fcmp ole A B)
              */
-            LLVMValueRef fcmpuge = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealUGE, left, right, "cmpg");
-            LLVMValueRef fcmpole = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOLE, left, right, "cmpg");
+            LLVMValueRef fcmpuge = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealUGE, left, right2, "cmpg");
+            LLVMValueRef fcmpole = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOLE, left, right2, "cmpg");
 
             LLVMValueRef fsub = LLVM.LLVMBuildFSub(builder, buildTypeCast(fcmpuge, resType), buildTypeCast(fcmpole, resType), "cmpg");
             return fsub;
         } else if (op.equals("cmpl")) {
-            as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             as.assertTrue(operandKind == LLVM.LLVMFloatTypeKind || operandKind == LLVM.LLVMDoubleTypeKind,
                     "Typing: CMPL should receive real type. Got: {}. Left val: {}. Right val: {}",
                     getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right));
             /*
              * Trans: cmpl A B => (fcmp oge A B) - (fcmp ule A B)
              */
-            LLVMValueRef fcmpoge = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOGE, left, right, "cmpl");
-            LLVMValueRef fcmpule = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealULE, left, right, "cmpl");
+            LLVMValueRef fcmpoge = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOGE, left, right2, "cmpl");
+            LLVMValueRef fcmpule = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealULE, left, right2, "cmpl");
 
             LLVMValueRef fsub = LLVM.LLVMBuildFSub(builder, buildTypeCast(fcmpoge, resType), buildTypeCast(fcmpule, resType), "cmpl");
             return fsub;
         } else if (op.equals("shl")) {
-            as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             as.assertTrue(operandKind == LLVM.LLVMIntegerTypeKind, "The operand should have integer type. Got {}.", getLLVMStr(operandType));
-            LLVMValueRef shl = LLVM.LLVMBuildShl(builder, left, right, "shl");
+            LLVMValueRef shl = LLVM.LLVMBuildShl(builder, left, right2, "shl");
             return shl;
         } else if (op.equals("shr")) {
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
             as.assertTrue(operandKind == LLVM.LLVMIntegerTypeKind, "The operand should have integer type. Got {}.", getLLVMStr(operandType));
-            LLVMValueRef shr = LLVM.LLVMBuildAShr(builder, left, right, "shr");
+            LLVMValueRef shr = LLVM.LLVMBuildAShr(builder, left, right2, "shr");
             return shr;
         } else if (op.equals("ushr")) {
-            as.assertTrue(operandType != null, "The left and right op kind should be the same. Left op: {}. Right op: {}", getLLVMStr(left), getLLVMStr(right));
+            int operandKind = leftOpKind;
+            LLVMTypeRef operandType = lType;
+            LLVMValueRef right2 = buildTypeCast(right, lType);
+
             as.assertTrue(operandKind == LLVM.LLVMIntegerTypeKind, "The operand should have integer type. Got {}.", getLLVMStr(operandType));
-            LLVMValueRef ushr = LLVM.LLVMBuildLShr(builder, left, right, "ushr");
+            LLVMValueRef ushr = LLVM.LLVMBuildLShr(builder, left, right2, "ushr");
             return ushr;
         } else {
             as.unreachable("Unexpected op {}", op);
@@ -773,31 +806,6 @@ public class LLVMCodeGen {
         );
         return methodType;
 
-    }
-
-    /*
-     * Value Manipulations
-     */
-    public Pair<LLVMValueRef, LLVMValueRef> unifyValues(Optional<LLVMValueRef> val1, Optional<LLVMValueRef> val2, LLVMTypeRef defaultType) {
-        as.assertTrue(defaultType != null, "There should be a defaultType in case both val1 & val2 are nulls");
-        if (val1.isPresent() && val2.isPresent()) {
-            return new Pair<>(val1.get(), val2.get());
-        } else if (val1.isEmpty() && val2.isEmpty()) {
-            LLVMValueRef nullVal1 = buildNull(defaultType);
-            LLVMValueRef nullVal2 = buildNull(defaultType);
-            return new Pair<>(nullVal1, nullVal2);
-        } else if (val1.isEmpty()) {
-            LLVMTypeRef valType2 = getValueType(val2.get());
-            LLVMValueRef nullVal1 = buildNull(valType2);
-            return new Pair<>(nullVal1, val2.get());
-        } else if (val2.isEmpty()) {
-            LLVMTypeRef valType1 = getValueType(val1.get());
-            LLVMValueRef nullVal2 = buildNull(valType1);
-            return new Pair<>(val1.get(), nullVal2);
-        } else {
-            as.unreachable("Unreachable");
-            return null;
-        }
     }
 
 
