@@ -377,6 +377,9 @@ public class LLVMCodeGen {
             } else if (operandKind == LLVM.LLVMFloatTypeKind || operandKind == LLVM.LLVMDoubleTypeKind) {
                 LLVMValueRef fcmp = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealONE, left, right2, "realne");
                 return fcmp;
+            } else if (operandKind == LLVM.LLVMPointerTypeKind) {
+                LLVMValueRef ptreq = LLVM.LLVMBuildICmp(builder, LLVM.LLVMIntEQ, left, right2, "ptreq");
+                return ptreq;
             } else {
                 as.unreachable("Unexpected operand type: {}. Left val: {}. Right val: {}",
                         getLLVMStr(operandType), getLLVMStr(left), getLLVMStr(right2));
@@ -575,7 +578,8 @@ public class LLVMCodeGen {
         JELLYFISH_MONITOR_EXIT("jellyfish.monitor.exit"),
         JELLYFISH_INSTANCEOF("jellyfish.instanceof"),
         JELLYFISH_CLASS("jellyfish.class"),
-        JELLYFISH_METHODTYPE("jellyfish.methodtype");
+        JELLYFISH_METHODTYPE("jellyfish.methodtype"),
+        JELLYFISH_CATCH("jellyfish.catch");
         private final String name;
 
         IntrinsicID(String name) {
@@ -610,6 +614,10 @@ public class LLVMCodeGen {
                 return String.format("%s.%s", ID.getName(), uuid);
             }
             case JELLYFISH_METHODTYPE: {
+                String uuid = (String) params[0];
+                return String.format("%s.%s", ID.getName(), uuid);
+            }
+            case JELLYFISH_CATCH: {
                 String uuid = (String) params[0];
                 return String.format("%s.%s", ID.getName(), uuid);
             }
@@ -703,7 +711,17 @@ public class LLVMCodeGen {
                 );
                 LLVMValueRef ret = this.addFunction(jellyfishMethodtypeTy, intrinsicName);
                 return ret;
+            }
+            case JELLYFISH_CATCH: {
+                // void jellyfish.catch.[unique id]([A specific catched type] catched)
+                LLVMTypeRef catchedType = (LLVMTypeRef) params[1];
 
+                LLVMTypeRef jellyfishCatchTy = buildFunctionType(
+                        buildVoidType(),
+                        List.of(catchedType)
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishCatchTy, intrinsicName);
+                return ret;
             }
         }
         as.unreachable("Unexpected case: {} {}", ID, params);
@@ -805,7 +823,18 @@ public class LLVMCodeGen {
                 List.of(buildNull(funcPtrType))
         );
         return methodType;
+    }
 
+    public LLVMValueRef buildCatch(LLVMValueRef catched) {
+        String uuid = StringUtil.getUUID();
+        LLVMTypeRef type = getValueType(catched);
+
+        LLVMValueRef jellyfishCatch = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_CATCH, uuid, type);
+        LLVMValueRef theCatch = buildCall(
+                jellyfishCatch,
+                List.of(catched)
+        );
+        return theCatch;
     }
 
 

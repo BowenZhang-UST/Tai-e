@@ -426,7 +426,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 return;
             }
         } catch (AnalysisException e) {
-            logger.info("Error: {}", e.getMessage());
             maps.clearVarMap();
             maps.clearStmtBlockMap();
             return;
@@ -553,6 +552,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                  * -------------------
                  *       T2 = T3
                  */
+                // TODO: Evaluate implicit cast at stores.
                 boolean enableImplicitCast;
                 if (ltype instanceof ClassType &&
                         rtype instanceof ClassType &&
@@ -564,7 +564,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 } else {
                     enableImplicitCast = false;
                 }
-                LLVMValueRef llvmValue = tranRValue(rvalue, llvmPtrElTy, enableImplicitCast);
+                LLVMValueRef llvmValue = tranRValue(rvalue, llvmPtrElTy, true);
                 LLVMValueRef store = codeGen.buildStore(llvmPtr, llvmValue);
 
                 resInsts.addAll(List.of(llvmPtr, llvmValue, store));
@@ -694,6 +694,14 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMValueRef exit = codeGen.buildMonitorExit(llvmObj, objectType);
                 return resInsts;
             }
+        } else if (jstmt instanceof Catch) {
+            Var catchedVar = ((Catch) jstmt).getExceptionRef();
+            JClass exceptionClass = world.getClassHierarchy().getClass("java.lang.Exception");
+            LLVMTypeRef exceptionType = tranType(exceptionClass.getType(), ClassDepID.DEP_FIELDS);
+
+            LLVMValueRef catched = tranRValue(catchedVar, exceptionType);
+            LLVMValueRef theCatch = codeGen.buildCatch(catched);
+            return resInsts;
         }
         as.unreachable("Unexpected statement: {}", jstmt);
         return null;
