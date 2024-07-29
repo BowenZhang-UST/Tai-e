@@ -579,7 +579,8 @@ public class LLVMCodeGen {
         JELLYFISH_INSTANCEOF("jellyfish.instanceof"),
         JELLYFISH_CLASS("jellyfish.class"),
         JELLYFISH_METHODTYPE("jellyfish.methodtype"),
-        JELLYFISH_CATCH("jellyfish.catch");
+        JELLYFISH_CATCH("jellyfish.catch"),
+        JELLYFISH_THROW("jellyfish.throw");
         private final String name;
 
         IntrinsicID(String name) {
@@ -618,6 +619,10 @@ public class LLVMCodeGen {
                 return String.format("%s.%s", ID.getName(), uuid);
             }
             case JELLYFISH_CATCH: {
+                String uuid = (String) params[0];
+                return String.format("%s.%s", ID.getName(), uuid);
+            }
+            case JELLYFISH_THROW: {
                 String uuid = (String) params[0];
                 return String.format("%s.%s", ID.getName(), uuid);
             }
@@ -719,6 +724,17 @@ public class LLVMCodeGen {
                 LLVMTypeRef jellyfishCatchTy = buildFunctionType(
                         buildVoidType(),
                         List.of(catchedType)
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishCatchTy, intrinsicName);
+                return ret;
+            }
+            case JELLYFISH_THROW: {
+                // void jellyfish.throw.[unique id]([A specific throwed type] throwed)
+                LLVMTypeRef throwedType = (LLVMTypeRef) params[1];
+
+                LLVMTypeRef jellyfishCatchTy = buildFunctionType(
+                        buildVoidType(),
+                        List.of(throwedType)
                 );
                 LLVMValueRef ret = this.addFunction(jellyfishCatchTy, intrinsicName);
                 return ret;
@@ -835,6 +851,18 @@ public class LLVMCodeGen {
                 List.of(catched)
         );
         return theCatch;
+    }
+
+    public LLVMValueRef buildThrow(LLVMValueRef throwed) {
+        String uuid = StringUtil.getUUID();
+        LLVMTypeRef type = getValueType(throwed);
+
+        LLVMValueRef jellyfishThrow = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_THROW, uuid, type);
+        LLVMValueRef theThrow = buildCall(
+                jellyfishThrow,
+                List.of(throwed)
+        );
+        return theThrow;
     }
 
 

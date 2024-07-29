@@ -724,6 +724,14 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMValueRef catched = tranRValue(catchedVar, exceptionType);
             LLVMValueRef theCatch = codeGen.buildCatch(catched);
             return resInsts;
+        } else if (jstmt instanceof Throw) {
+            Var throwedVar = ((Throw) jstmt).getExceptionRef();
+            JClass exceptionClass = world.getClassHierarchy().getClass("java.lang.Exception");
+            LLVMTypeRef exceptionType = tranType(exceptionClass.getType(), ClassDepID.DEP_FIELDS);
+
+            LLVMValueRef throwed = tranRValue(throwedVar, exceptionType);
+            LLVMValueRef theThrow = codeGen.buildThrow(throwed);
+            return resInsts;
         }
         as.unreachable("Unexpected statement: {}", jstmt);
         return null;
@@ -1320,7 +1328,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     public LLVMValueRef resolveMethod(Var base, Subsignature sig) {
         Type baseType = base.getType();
-        as.assertTrue(baseType instanceof ClassType, "The base var should be ClassType. Got {}.", baseType);
+        if (baseType instanceof ArrayType) {
+            JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
+            baseType = objClass.getType();
+        }
+
+        as.assertTrue(baseType instanceof ClassType, "The base var should be ClassType. Got {}. On sig: {}. ", baseType, sig);
         JClass baseClass = ((ClassType) baseType).getJClass();
 
         JClass curClass = baseClass;
@@ -1345,6 +1358,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         Integer indexFuncPtr = null;
         int steps = 0;
         while (curClass2 != null) {
+            requireType(curClass2.getType(), ClassDepID.DEP_FIELDS);
             JMethod candidate = curClass2.getDeclaredMethod(sig);
             if (candidate != null) {
                 Optional<Integer> opIndex = getOrTranVirtualMethod(candidate);
@@ -1360,9 +1374,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 "Unexpected class hierarchy. The virtual method is not found. Base class: {}, sig: {}", baseClass, sig);
         as.assertTrue(indexFuncPtr != null,
                 "The index is not found.");
-        JClass tarClass = curClass2;
 
-        LLVMValueRef llvmVar = tranRValue(base, tranType(tarClass.getType(), ClassDepID.DEP_FIELDS), true);
+        LLVMValueRef llvmVar = tranRValue(base, tranType(baseType, ClassDepID.DEP_FIELDS), true);
         List<LLVMValueRef> indexes = new ArrayList<>();
 
         for (int i = 0; i < steps + 1; i++) {
@@ -1377,6 +1390,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 codeGen.buildIntType(32),
                 indexFuncPtr.intValue()
         ));
+        logger.info("Before GEP. Var: {}. Indexes: {}", getLLVMStr(llvmVar), indexes);
         LLVMValueRef funcPtrPtr = codeGen.buildGEP(llvmVar, indexes);
         LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
         return funcPtr;

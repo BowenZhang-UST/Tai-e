@@ -29,18 +29,26 @@ public class StringUtil {
         return String.format("%s.%s", className, jfield.getName());
     }
 
-    public static String getVarNameAsPtr(Var var) {
+    private static String getRealVarName(Var var) {
         String varName = var.getName();
-        as.assertTrue(varName.length() > 1, String.format("The var name of %s should starts with '%%'.", var));
-        String realVarName = varName.substring(1);
-        return String.format("var.%s", realVarName);
+        String realVarName = null;
+        if (varName.substring(0, 1).equals("%")) {
+            realVarName = varName.substring(1);
+        } else if (varName.length() > 0) {
+            realVarName = varName;
+        } else {
+            as.unreachable("Error: the var name is empty. Var: {}", var);
+        }
+        return realVarName;
+
+    }
+
+    public static String getVarNameAsPtr(Var var) {
+        return String.format("var.%s", getRealVarName(var));
     }
 
     public static String getVarNameAsLoad(Var var) {
-        String varName = var.getName();
-        as.assertTrue(varName.length() > 1, String.format("The var name of %s should starts with '%%'.", var));
-        String realVarName = varName.substring(1);
-        return String.format("load.%s", realVarName);
+        return String.format("load.%s", getRealVarName(var));
     }
 
     public static String getAscii(String str) {
