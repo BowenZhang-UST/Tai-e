@@ -65,8 +65,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     @Override
     public Void analyze() {
-//        List<JClass> jclasses = classHierarchy.applicationClasses().toList();
-        List<JClass> jclasses = classHierarchy.allClasses().toList();
+        List<JClass> jclasses = classHierarchy.applicationClasses().toList();
+//        List<JClass> jclasses = classHierarchy.allClasses().toList();
         for (JClass jclass : jclasses) {
             String className = jclass.getName();
             String moduleName = jclass.getModuleName();
@@ -1303,19 +1303,29 @@ public class JellyFish extends ProgramAnalysis<Void> {
         as.assertTrue(baseType instanceof ClassType, "The base var should be ClassType. Got {}.", baseType);
         JClass baseClass = ((ClassType) baseType).getJClass();
 
-        JMethod declaredMethod = baseClass.getDeclaredMethod(sig);
+        JClass curClass = baseClass;
+        JMethod nearestMethod = null;
+        while (curClass != null) {
+            JMethod declaredMethod = curClass.getDeclaredMethod(sig);
+            if (declaredMethod != null) {
+                nearestMethod = declaredMethod;
+                break;
+            }
+            curClass = curClass.getSuperClass();
+        }
+        as.assertTrue(nearestMethod != null, "There should at least one method for sig: {}.", sig);
 
         // Check if it's a direct call:
-        if (!isVirtualMethod(declaredMethod)) {
-            return getOrTranMethodDecl(declaredMethod);
+        if (!isVirtualMethod(nearestMethod)) {
+            return getOrTranMethodDecl(nearestMethod);
         }
 
         // Otherwise, translate the virtual call by finding the root virtual method:
-        JClass curClass = baseClass;
+        JClass curClass2 = baseClass;
         Integer indexFuncPtr = null;
         int steps = 0;
-        while (curClass != null) {
-            JMethod candidate = curClass.getDeclaredMethod(sig);
+        while (curClass2 != null) {
+            JMethod candidate = curClass2.getDeclaredMethod(sig);
             if (candidate != null) {
                 Optional<Integer> opIndex = maps.getVirtualMethodMap(candidate);
                 if (opIndex.isPresent()) {
@@ -1323,12 +1333,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     break;
                 }
             }
-            curClass = curClass.getSuperClass();
+            curClass2 = curClass2.getSuperClass();
             steps += 1;
         }
-        as.assertTrue(curClass != null && indexFuncPtr != null,
+        as.assertTrue(curClass2 != null && indexFuncPtr != null,
                 "Unexpected class hierarchy. The virtual method is not found. Base class: {}, sig: {}", baseClass, sig);
-        JClass tarClass = curClass;
+        JClass tarClass = curClass2;
 
         LLVMValueRef llvmVar = tranRValue(base, tranType(baseType, ClassDepID.DEP_METHOD_DECL), false);
         List<LLVMValueRef> indexes = new ArrayList<>();
