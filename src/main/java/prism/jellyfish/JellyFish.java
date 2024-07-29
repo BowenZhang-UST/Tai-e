@@ -153,6 +153,25 @@ public class JellyFish extends ProgramAnalysis<Void> {
         }
     }
 
+    public LLVMValueRef getOrTranStaticField(JField jfield) {
+        requireType(jfield.getDeclaringClass().getType(), ClassDepID.DEP_FIELDS);
+        Optional<LLVMValueRef> opfieldPtr = maps.getStaticFieldMap(jfield);
+        as.assertTrue(opfieldPtr.isPresent(), "The field {} should have been translated.", jfield);
+        return opfieldPtr.get();
+    }
+
+    public Integer getOrTranMemberField(JField jfield) {
+        requireType(jfield.getDeclaringClass().getType(), ClassDepID.DEP_FIELDS);
+        Optional<Integer> opfieldIndex = maps.getMemberFieldMap(jfield);
+        as.assertTrue(opfieldIndex.isPresent(), "The field {} should have been translated.", jfield);
+        return opfieldIndex.get();
+    }
+
+    public Optional<Integer> getOrTranVirtualMethod(JMethod jmethod) {
+        requireType(jmethod.getDeclaringClass().getType(), ClassDepID.DEP_FIELDS);
+        return maps.getVirtualMethodMap(jmethod);
+    }
+
     public LLVMValueRef getOrTranStringLiteral(String str) {
         /*
          * Trans:
@@ -321,6 +340,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMTypeRef retType = tranType(jretType, ClassDepID.DEP_DECL);
         LLVMTypeRef funcType = codeGen.buildFunctionType(retType, paramTypes);
         return funcType;
+    }
+
+    public void requireType(Type jType, ClassDepID dep) {
+        tranType(jType, dep);
+        return;
     }
 
     public LLVMTypeRef tranType(Type jType, ClassDepID dep) {
@@ -828,12 +852,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 FieldRef fieldRef = ((StaticFieldAccess) jexp).getFieldRef();
                 JField jfield = fieldRef.resolveNullable();
                 as.assertTrue(jfield != null, "The static field access must can be handled");
-                JClass declaringClass = jfield.getDeclaringClass();
-                LLVMTypeRef llvmDeclClass = tranType(declaringClass.getType(), ClassDepID.DEP_FIELDS);
 
-                Optional<LLVMValueRef> opfieldPtr = maps.getStaticFieldMap(jfield);
-                as.assertTrue(opfieldPtr.isPresent(), "The field {} should have been translated.", jfield);
-                LLVMValueRef ptr = opfieldPtr.get();
+                JClass declaringClass = jfield.getDeclaringClass();
+                requireType(declaringClass.getType(), ClassDepID.DEP_FIELDS);
+
+                LLVMValueRef ptr = getOrTranStaticField(jfield);
                 LLVMValueRef load = codeGen.buildLoad(ptr, jfield.getName());
                 return load;
             } else if (jexp instanceof InstanceFieldAccess) {
@@ -1184,9 +1207,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 FieldRef fieldRef = ((StaticFieldAccess) jexp).getFieldRef();
                 JField jfield = fieldRef.resolveNullable();
                 if (jfield != null) {
-                    Optional<LLVMValueRef> opfieldPtr = maps.getStaticFieldMap(jfield);
-                    as.assertTrue(opfieldPtr.isPresent(), "The field {} should have been translated.", jfield);
-                    LLVMValueRef ptr = opfieldPtr.get();
+                    LLVMValueRef ptr = getOrTranStaticField(jfield);
                     return ptr;
                 }
             } else if (jexp instanceof InstanceFieldAccess) {
@@ -1249,14 +1270,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMTypeRef llvmTarClass = tranType(tarClass.getType(), ClassDepID.DEP_FIELDS);
         LLVMValueRef base = tranRValue(baseVar, llvmTarClass, true);
 
-        Optional<Integer> opfieldIndex = maps.getMemberFieldMap(jfield);
-        as.assertTrue(opfieldIndex.isPresent(), "The field {} should have been translated", jfield);
-        int index = opfieldIndex.get().intValue();
+        Integer index = getOrTranMemberField(jfield);
         LLVMValueRef ptr = codeGen.buildGEP(
                 base,
                 List.of(
                         codeGen.buildConstInt(codeGen.buildIntType(32), 0),
-                        codeGen.buildConstInt(codeGen.buildIntType(32), index)
+                        codeGen.buildConstInt(codeGen.buildIntType(32), index.intValue())
                 )
         );
         return ptr;
@@ -1328,7 +1347,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         while (curClass2 != null) {
             JMethod candidate = curClass2.getDeclaredMethod(sig);
             if (candidate != null) {
-                Optional<Integer> opIndex = maps.getVirtualMethodMap(candidate);
+                Optional<Integer> opIndex = getOrTranVirtualMethod(candidate);
                 if (opIndex.isPresent()) {
                     indexFuncPtr = opIndex.get();
                     break;
@@ -1337,8 +1356,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
             curClass2 = curClass2.getSuperClass();
             steps += 1;
         }
-        as.assertTrue(curClass2 != null && indexFuncPtr != null,
+        as.assertTrue(curClass2 != null,
                 "Unexpected class hierarchy. The virtual method is not found. Base class: {}, sig: {}", baseClass, sig);
+        as.assertTrue(indexFuncPtr != null,
+                "The index is not found.");
         JClass tarClass = curClass2;
 
         LLVMValueRef llvmVar = tranRValue(base, tranType(baseType, ClassDepID.DEP_METHOD_DECL), false);
