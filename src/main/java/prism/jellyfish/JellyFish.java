@@ -1,6 +1,7 @@
 package prism.jellyfish;
 
 
+import org.apache.logging.log4j.Level;
 import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
 import pascal.taie.World;
 import pascal.taie.analysis.ProgramAnalysis;
@@ -22,7 +23,6 @@ import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
@@ -61,6 +61,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
         this.classHierarchy = world.getClassHierarchy();
         this.codeGen = new LLVMCodeGen();
         this.maps = new Mappings();
+
+        logger.atLevel(Level.ERROR);
     }
 
     @Override
@@ -71,7 +73,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             String className = jclass.getName();
             String moduleName = jclass.getModuleName();
             String simpleName = jclass.getSimpleName();
-            logger.info("Init class: name: {}, module name: {}, simple name:{}", className, moduleName, simpleName);
+            logger.debug("Init class: name: {}, module name: {}, simple name:{}", className, moduleName, simpleName);
             // Class
             LLVMTypeRef llvmClass = getOrTranClass(jclass, ClassDepID.DEP_METHOD_DEF);
         }
@@ -431,7 +433,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
 //            return;
 //        }
 
-        logger.info("*Method: {}. In Class: {}", jmethod.getName(), jmethod.getDeclaringClass());
+        logger.debug("*Method: {}. In Class: {}", jmethod.getName(), jmethod.getDeclaringClass());
         Optional<LLVMValueRef> opllvmFunc = maps.getMethodMap(jmethod);
         as.assertTrue(opllvmFunc.isPresent(), "The decl of jmethod {} should have be translated", jmethod);
         LLVMValueRef llvmFunc = opllvmFunc.get();
@@ -486,13 +488,13 @@ public class JellyFish extends ProgramAnalysis<Void> {
         // In this process,
         // the edges related to control flow stmts will be constructed.
         for (Stmt jstmt : jstmts) {
-            logger.info("**Stmt: {}", jstmt);
+            logger.debug("**Stmt: {}", jstmt);
             LLVMBasicBlockRef bb = maps.getStmtBlockMap(jstmt).get();
             codeGen.setInsertBlock(bb);
             List<LLVMValueRef> llvmInsts = this.tranStmt(jstmt, jmethod, cfg);
 
             List<String> llvmInstStrs = llvmInsts.stream().map(inst -> getLLVMStr(inst)).toList();
-            for (String str : llvmInstStrs) logger.info("  => {}", str);
+            for (String str : llvmInstStrs) logger.debug("  => {}", str);
         }
 
         // Handle the normal basic blocks without a terminator instructions
@@ -1379,7 +1381,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 codeGen.buildIntType(32),
                 indexFuncPtr.intValue()
         ));
-        logger.info("Before GEP. Var: {}. Indexes: {}", getLLVMStr(llvmVar), indexes);
         LLVMValueRef funcPtrPtr = codeGen.buildGEP(llvmVar, indexes);
         LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
         return funcPtr;
