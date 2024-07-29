@@ -1362,7 +1362,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 "The index is not found.");
         JClass tarClass = curClass2;
 
-        LLVMValueRef llvmVar = tranRValue(base, tranType(baseType, ClassDepID.DEP_METHOD_DECL), false);
+        LLVMValueRef llvmVar = tranRValue(base, tranType(tarClass.getType(), ClassDepID.DEP_FIELDS), false);
         List<LLVMValueRef> indexes = new ArrayList<>();
 
         for (int i = 0; i < steps + 1; i++) {
@@ -1377,7 +1377,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 codeGen.buildIntType(32),
                 indexFuncPtr.intValue()
         ));
-
         LLVMValueRef funcPtrPtr = codeGen.buildGEP(llvmVar, indexes);
         LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
         return funcPtr;
