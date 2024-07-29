@@ -163,12 +163,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
          * 3. <init>(s, str);
          */
         JClass stringClass = classHierarchy.getClass("java.lang.String");
-
         JMethod jinitMethod = stringClass.getDeclaredMethod(Subsignature.get("void <init>(byte[])"));
         as.assertTrue(jinitMethod != null, "String Class should has a init method. Got null.");
-        Optional<LLVMValueRef> opInitMethod = maps.getMethodMap(jinitMethod);
-        as.assertTrue(opInitMethod.isPresent(), "The init method should have been handled.");
-        LLVMValueRef llvmInitMethod = opInitMethod.get();
+
+        LLVMValueRef llvmStrInitMethod = getOrTranMethodDecl(jinitMethod);
 
         // 1.
         LLVMValueRef llvmStrConst;
@@ -180,7 +178,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             llvmStrConst = codeGen.buildConstString(str);
             maps.setStringPoolMap(str, llvmStrConst);
         }
-        LLVMTypeRef byteArrayType = getValueType(LLVM.LLVMGetParam(llvmInitMethod, 1));
+        LLVMTypeRef byteArrayType = getValueType(LLVM.LLVMGetParam(llvmStrInitMethod, 1));
         LLVMValueRef llvmStrConst2 = codeGen.buildTypeCast(llvmStrConst, byteArrayType);
 
         // 2.
@@ -188,7 +186,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMValueRef llvmStrPtr = codeGen.buildMalloc(llvmStringClass);
 
         // 3.
-        codeGen.buildCall(llvmInitMethod, List.of(llvmStrPtr, llvmStrConst2));
+        codeGen.buildCall(llvmStrInitMethod, List.of(llvmStrPtr, llvmStrConst2));
         return llvmStrPtr;
     }
 
@@ -830,6 +828,9 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 FieldRef fieldRef = ((StaticFieldAccess) jexp).getFieldRef();
                 JField jfield = fieldRef.resolveNullable();
                 as.assertTrue(jfield != null, "The static field access must can be handled");
+                JClass declaringClass = jfield.getDeclaringClass();
+                LLVMTypeRef llvmDeclClass = tranType(declaringClass.getType(), ClassDepID.DEP_FIELDS);
+
                 Optional<LLVMValueRef> opfieldPtr = maps.getStaticFieldMap(jfield);
                 as.assertTrue(opfieldPtr.isPresent(), "The field {} should have been translated.", jfield);
                 LLVMValueRef ptr = opfieldPtr.get();
