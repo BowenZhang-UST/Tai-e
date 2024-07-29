@@ -586,7 +586,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 } else {
                     enableImplicitCast = false;
                 }
-                LLVMValueRef llvmValue = tranRValue(rvalue, llvmPtrElTy, true);
+                LLVMValueRef llvmValue = tranRValueCast(rvalue, llvmPtrElTy);
                 LLVMValueRef store = codeGen.buildStore(llvmPtr, llvmValue);
 
                 resInsts.addAll(List.of(llvmPtr, llvmValue, store));
@@ -607,7 +607,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     LLVMTypeRef llvmPtrType = getValueType(llvmPtr);
                     LLVMTypeRef llvmPtrElType = LLVM.LLVMGetElementType(llvmPtrType);
 
-                    LLVMValueRef llvmCall = tranRValue(invokeExp, llvmPtrElType, false);
+                    LLVMValueRef llvmCall = tranRValueCast(invokeExp, llvmPtrElType);
 
                     LLVMValueRef store = codeGen.buildStore(llvmPtr, llvmCall);
 
@@ -677,7 +677,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMBasicBlockRef falseBlock = maps.getStmtBlockMap(falseTarget).get();
 
                 ConditionExp cond = ((If) jstmt).getCondition();
-                LLVMValueRef condVal = tranRValue(cond, codeGen.buildIntType(1), true);
+                LLVMValueRef condVal = tranRValueCast(cond, codeGen.buildIntType(1));
                 LLVMValueRef br = codeGen.buildCondBr(condVal, trueBlock, falseBlock);
                 as.assertTrue(br != null, "There should be a value");
                 resInsts.add(br);
@@ -693,7 +693,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 Type jretType = jmethod.getReturnType();
                 LLVMTypeRef retType = tranType(jretType, ClassDepID.DEP_FIELDS);
                 as.assertTrue(LLVM.LLVMGetTypeKind(retType) != LLVM.LLVMVoidTypeKind, "The none-void return stmt {} should not return void.", jstmt);
-                LLVMValueRef retVal = tranRValue(var, retType, false);
+                LLVMValueRef retVal = tranRValueCast(var, retType);
                 LLVMValueRef ret = codeGen.buildRet(Optional.of(retVal));
                 resInsts.add(ret);
                 return resInsts;
@@ -707,7 +707,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
             LLVMTypeRef objectType = tranType(objClass.getType(), ClassDepID.DEP_FIELDS);
 
-            LLVMValueRef llvmObj = tranRValue(obj, objectType, true);
+            LLVMValueRef llvmObj = tranRValueCast(obj, objectType);
 
             if (((Monitor) jstmt).isEnter()) {
                 LLVMValueRef enter = codeGen.buildMonitorEnter(llvmObj, objectType);
@@ -757,27 +757,16 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return translatedVal;
     }
 
-    public LLVMValueRef tranRValue(RValue jexp, LLVMTypeRef outType, boolean autoCast) {
+    public LLVMValueRef tranRValueCast(RValue jexp, LLVMTypeRef outType) {
         /* Translate RValue with a specified out Type.
-         * So that the resulting LLVM value would either be:
-         * enforced with a type check (autoCast = false)
-         * Automatically casted to the outType (autoCast = true)
-         * Also, we would use it as the default type.
+         * The resulted value will be automatically cast to outType.
          */
         as.assertTrue(outType != null, "Need to specify an out type to get a LLVM value with this type.");
 
         LLVMValueRef translatedVal = tranRValueImpl(jexp, Optional.of(outType));  // pass in as default type
         as.assertTrue(translatedVal != null, "We can't obtain a null value when using a default out type.");
 
-        if (autoCast) {
-            return codeGen.buildTypeCast(translatedVal, outType);  // convert if needed.
-        } else {
-            LLVMTypeRef valType = getValueType(translatedVal);
-            as.assertTrue(valType.equals(outType),
-                    "Typing: the translated type should == outType.\n" +
-                            " Translated Val: {}. Out Type: {}", getLLVMStr(translatedVal), getLLVMStr(outType));
-            return translatedVal;
-        }
+        return codeGen.buildTypeCast(translatedVal, outType);
     }
 
     @Nullable
@@ -882,7 +871,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 Var arrayVar = ((ArrayLengthExp) jexp).getBase();
                 Type resType = jexp.getType();
 
-                LLVMValueRef llvmArrayPtr = tranRValue(arrayVar, codeGen.buildPointerType(codeGen.buildIntType(32)), true);
+                LLVMValueRef llvmArrayPtr = tranRValueCast(arrayVar, codeGen.buildPointerType(codeGen.buildIntType(32)));
                 return codeGen.buildLength(llvmArrayPtr);
             } else if (jexp instanceof NegExp) {
                 Var var = ((NegExp) jexp).getValue();
@@ -905,8 +894,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
                  * -------------------
                  *     T = T1 = T2
                  */
-                LLVMValueRef leftVal = tranRValue(left, resType, true);
-                LLVMValueRef rightVal = tranRValue(right, resType, true);
+                LLVMValueRef leftVal = tranRValueCast(left, resType);
+                LLVMValueRef rightVal = tranRValueCast(right, resType);
 
                 ArithmeticExp.Op op = ((ArithmeticExp) jexp).getOperator();
 
@@ -936,8 +925,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
                  * -------------------
                  *     T = T1 = T2
                  */
-                LLVMValueRef leftVal = tranRValue(left, resType, true);
-                LLVMValueRef rightVal = tranRValue(right, resType, true);
+                LLVMValueRef leftVal = tranRValueCast(left, resType);
+                LLVMValueRef rightVal = tranRValueCast(right, resType);
 
                 BitwiseExp.Op op = ((BitwiseExp) jexp).getOperator();
 
@@ -1034,8 +1023,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
                  * -------------------
                  *     T = T1 = T2
                  */
-                LLVMValueRef leftVal = tranRValue(left, resType, true);
-                LLVMValueRef rightVal = tranRValue(right, resType, true);
+                LLVMValueRef leftVal = tranRValueCast(left, resType);
+                LLVMValueRef rightVal = tranRValueCast(right, resType);
                 ShiftExp.Op op = ((ShiftExp) jexp).getOperator();
                 String opStr = "";
                 if (op.equals(ShiftExp.Op.SHL)) {
@@ -1067,7 +1056,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMValueRef llvmBaseSizeConst = codeGen.buildSizeOf(llvmBaseType);
 
                 Var lengthVar = ((NewArray) jexp).getLength();
-                LLVMValueRef length = tranRValue((RValue) lengthVar, codeGen.buildIntType(32), true);
+                LLVMValueRef length = tranRValueCast((RValue) lengthVar, codeGen.buildIntType(32));
                 LLVMValueRef object = codeGen.buildNewArray(llvmBaseSizeConst, List.of(length), newedType);
                 return object;
 
@@ -1083,7 +1072,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 List<Var> lengthVars = ((NewMultiArray) jexp).getLengths();
                 List<LLVMValueRef> lengths = new ArrayList<>();
                 for (int d = 0; d < lengthVars.size(); d++) {
-                    LLVMValueRef theLength = tranRValue((RValue) lengthVars.get(d), codeGen.buildIntType(32), true);
+                    LLVMValueRef theLength = tranRValueCast((RValue) lengthVars.get(d), codeGen.buildIntType(32));
                     lengths.add(theLength);
                 }
                 LLVMValueRef object = codeGen.buildNewArray(llvmBaseSizeConst, lengths, newedType);
@@ -1103,7 +1092,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 for (int i = 0; i < jargs.size(); i++) {
                     LLVMValueRef llvmIthParam = LLVM.LLVMGetParam(callee, i);
                     Var jarg = jargs.get(i);
-                    LLVMValueRef llvmArg = tranRValue(jarg, getValueType(llvmIthParam), true);
+                    LLVMValueRef llvmArg = tranRValueCast(jarg, getValueType(llvmIthParam));
                     args.add(llvmArg);
                 }
                 LLVMValueRef call = codeGen.buildCall(callee, args);
@@ -1134,14 +1123,14 @@ public class JellyFish extends ProgramAnalysis<Void> {
                         jexp, ((InvokeInstanceExp) jexp).getArgCount() + 1);
                 List<LLVMTypeRef> paramTypes = getParamTypes(funcType);
                 LLVMTypeRef llvm0thParamTy = paramTypes.get(0);
-                LLVMValueRef llvmThis = tranRValue(baseVar, llvm0thParamTy, true);
+                LLVMValueRef llvmThis = tranRValueCast(baseVar, llvm0thParamTy);
                 List<LLVMValueRef> args = new ArrayList<>();
                 args.add(llvmThis);
                 List<Var> jargs = ((InvokeInstanceExp) jexp).getArgs();
                 for (int i = 1; i < jargs.size() + 1; i++) {
                     LLVMTypeRef llvmIthParamTy = paramTypes.get(i);
                     Var jarg = jargs.get(i - 1);
-                    LLVMValueRef llvmArg = tranRValue(jarg, llvmIthParamTy, true);
+                    LLVMValueRef llvmArg = tranRValueCast(jarg, llvmIthParamTy);
                     args.add(llvmArg);
                 }
                 LLVMValueRef call = codeGen.buildCall(callee, args);
@@ -1177,10 +1166,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
             Type jelementType = ((ArrayType) baseVar.getType()).elementType();   // :: T2
             LLVMTypeRef elementType = tranType(jelementType, ClassDepID.DEP_FIELDS);   // ::F2
 
-            LLVMValueRef base = tranRValue(baseVar, codeGen.buildPointerType(codeGen.buildArrayType(elementType, 0)), true);     // ::F1
+            LLVMValueRef base = tranRValueCast(baseVar, codeGen.buildPointerType(codeGen.buildArrayType(elementType, 0)));     // ::F1
 
             LLVMValueRef index1 = codeGen.buildConstInt(codeGen.buildIntType(32), 0);
-            LLVMValueRef index2 = tranRValue(indexVar, codeGen.buildIntType(32), true);
+            LLVMValueRef index2 = tranRValueCast(indexVar, codeGen.buildIntType(32));
             LLVMValueRef gep = codeGen.buildGEP(base, List.of(index1, index2));
             LLVMValueRef load = codeGen.buildLoad(gep, StringUtil.getVarNameAsLoad(baseVar));
             return load;
@@ -1189,7 +1178,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             Var var = ((CastExp) jexp).getValue();
             Type castType = ((CastExp) jexp).getCastType();
             LLVMTypeRef targetType = tranType(castType, ClassDepID.DEP_FIELDS);
-            LLVMValueRef llvmVal = tranRValue(var, targetType, true);
+            LLVMValueRef llvmVal = tranRValueCast(var, targetType);
             return llvmVal;
         } else if (jexp instanceof InstanceOfExp) {
             JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
@@ -1199,7 +1188,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMTypeRef checkType = tranType(jcheckType, ClassDepID.DEP_FIELDS);
 
             Var var = ((InstanceOfExp) jexp).getValue();
-            LLVMValueRef checkValue = tranRValue(var, objectType, true);
+            LLVMValueRef checkValue = tranRValueCast(var, objectType);
 
             LLVMValueRef instanceOf = codeGen.buildInstanceOf(checkValue, checkType, objectType);
             return instanceOf;
@@ -1252,10 +1241,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
             Type jelementType = ((ArrayType) baseVar.getType()).elementType();   // :: T2
             LLVMTypeRef elementType = tranType(jelementType, ClassDepID.DEP_FIELDS);   // ::F2
 
-            LLVMValueRef base = tranRValue(baseVar, codeGen.buildPointerType(codeGen.buildArrayType(elementType, 0)), true);   // ::F1
+            LLVMValueRef base = tranRValueCast(baseVar, codeGen.buildPointerType(codeGen.buildArrayType(elementType, 0)));   // ::F1
 
             LLVMValueRef index1 = codeGen.buildConstInt(codeGen.buildIntType(32), 0);
-            LLVMValueRef index2 = tranRValue(indexVar, codeGen.buildIntType(32), true);
+            LLVMValueRef index2 = tranRValueCast(indexVar, codeGen.buildIntType(32));
             List<LLVMValueRef> indices = List.of(index1, index2);
             LLVMValueRef gep = codeGen.buildGEP(base, indices);
             return gep;
@@ -1276,7 +1265,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         as.assertTrue(classHierarchy.isSubclass(tarClass, baseClass), "target class should be super of base. Target: {}. Base: {}", tarClass, baseClass);
 
         LLVMTypeRef llvmTarClass = tranType(tarClass.getType(), ClassDepID.DEP_FIELDS);
-        LLVMValueRef base = tranRValue(baseVar, llvmTarClass, true);
+        LLVMValueRef base = tranRValueCast(baseVar, llvmTarClass);
 
         Integer index = getOrTranMemberField(jfield);
         LLVMValueRef ptr = codeGen.buildGEP(
@@ -1375,7 +1364,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         as.assertTrue(indexFuncPtr != null,
                 "The index is not found.");
 
-        LLVMValueRef llvmVar = tranRValue(base, tranType(baseType, ClassDepID.DEP_FIELDS), true);
+        LLVMValueRef llvmVar = tranRValueCast(base, tranType(baseType, ClassDepID.DEP_FIELDS));
         List<LLVMValueRef> indexes = new ArrayList<>();
 
         for (int i = 0; i < steps + 1; i++) {
