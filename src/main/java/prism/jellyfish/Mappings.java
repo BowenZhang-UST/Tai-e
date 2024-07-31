@@ -18,14 +18,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 
-import prism.jellyfish.JellyFish.ClassDepID;
+import prism.jellyfish.JellyFish.ClassStatus;
 
 public class Mappings {
     private static final Logger logger = LogManager.getLogger(Mappings.class);
     private static final AssertUtil as = new AssertUtil(logger);
 
     public HashMap<JClass, LLVMTypeRef> classMap;
-    public HashMap<JClass, ClassDepID> classStatusMap;
+    public HashMap<JClass, ClassStatus> classStatusMap;
     public HashMap<JMethod, LLVMValueRef> methodMap;
     public HashMap<Var, LLVMValueRef> varMap;
     public HashMap<JField, LLVMValueRef> staticFieldMap;
@@ -85,19 +85,19 @@ public class Mappings {
     /*
      * Class status map
      */
-    public boolean setClassStatusMap(JClass jclass, ClassDepID id) {
-        Optional<ClassDepID> oldID = getFromMap(classStatusMap, jclass);
+    public boolean setClassStatusMap(JClass jclass, ClassStatus id) {
+        Optional<ClassStatus> oldID = getFromMap(classStatusMap, jclass);
         if (oldID.isPresent()) {
             as.assertTrue(oldID.get().getOrd() < id.getOrd(), "The status should be monotone. Old: {}, New: {}", oldID.get(), id);
         } else {
-            as.assertTrue(id == ClassDepID.DEP_DECL, "The first update should be DEP_DECL. Got {}.", id);
+            as.assertTrue(id == ClassStatus.DEP_DECL, "The first update should be DEP_DECL. Got {}.", id);
         }
 
         classStatusMap.put(jclass, id);
         return true;
     }
 
-    public Optional<ClassDepID> getClassStatusMap(JClass jclass) {
+    public Optional<ClassStatus> getClassStatusMap(JClass jclass) {
         return getFromMap(classStatusMap, jclass);
     }
 

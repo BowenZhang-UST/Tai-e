@@ -61,6 +61,12 @@ public class LLVMUtil {
         LLVMTypeRef funcType = LLVM.LLVMGetElementType(type);
         as.assertTrue(LLVM.LLVMGetTypeKind(funcType) == LLVM.LLVMFunctionTypeKind, "The pointer should point to a function. Got: {}", getLLVMStr(funcType));
         return funcType;
-
     }
+
+    public static boolean isOpaqueStruct(LLVMTypeRef struct) {
+        int ret = LLVM.LLVMIsOpaqueStruct(struct);
+        return ret == 1 ? true : false;
+    }
+
+
 }

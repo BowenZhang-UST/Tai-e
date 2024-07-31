@@ -447,7 +447,7 @@ public class LLVMCodeGen {
             LLVMValueRef fcmpuge = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealUGE, left, right2, "cmpg");
             LLVMValueRef fcmpole = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOLE, left, right2, "cmpg");
 
-            LLVMValueRef fsub = LLVM.LLVMBuildFSub(builder, buildTypeCast(fcmpuge, resType), buildTypeCast(fcmpole, resType), "cmpg");
+            LLVMValueRef fsub = LLVM.LLVMBuildSub(builder, buildTypeCast(fcmpuge, resType), buildTypeCast(fcmpole, resType), "cmpg");
             return fsub;
         } else if (op.equals("cmpl")) {
             int operandKind = leftOpKind;
@@ -463,7 +463,7 @@ public class LLVMCodeGen {
             LLVMValueRef fcmpoge = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealOGE, left, right2, "cmpl");
             LLVMValueRef fcmpule = LLVM.LLVMBuildFCmp(builder, LLVM.LLVMRealULE, left, right2, "cmpl");
 
-            LLVMValueRef fsub = LLVM.LLVMBuildFSub(builder, buildTypeCast(fcmpoge, resType), buildTypeCast(fcmpule, resType), "cmpl");
+            LLVMValueRef fsub = LLVM.LLVMBuildSub(builder, buildTypeCast(fcmpoge, resType), buildTypeCast(fcmpule, resType), "cmpl");
             return fsub;
         } else if (op.equals("shl")) {
             int operandKind = leftOpKind;
@@ -564,7 +564,6 @@ public class LLVMCodeGen {
             LLVMValueRef call = LLVM.LLVMBuildCall(builder, func, argArray.build(), argArray.length(), "call");
             return call;
         }
-
     }
 
     /*
