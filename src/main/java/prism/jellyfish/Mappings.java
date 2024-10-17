@@ -12,6 +12,7 @@ import pascal.taie.language.classes.JClass;
 import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
+import pascal.taie.language.classes.Subsignature;
 import prism.jellyfish.util.AssertUtil;
 
 import java.util.HashMap;
@@ -33,7 +34,8 @@ public class Mappings {
     public HashMap<JMethod, Integer> virtualMethodMap;
     public HashMap<String, LLVMValueRef> stringPoolMap;
     public HashMap<Stmt, LLVMBasicBlockRef> stmtBlockMap;
-
+    public HashMap<JClass, List<String>> classSigMap;
+    public HashMap<JClass, List<JMethod>> classMethodMap;
 
     public Mappings() {
         this.classMap = new HashMap<>();
@@ -45,6 +47,9 @@ public class Mappings {
         this.virtualMethodMap = new HashMap<>();
         this.stringPoolMap = new HashMap<>();
         this.stmtBlockMap = new HashMap<>();
+        this.classSigMap = new HashMap<>();
+        this.classMethodMap = new HashMap<>();
+
     }
 
     private <K, V> boolean setMap(HashMap<K, V> m, K key, V value) {
@@ -199,6 +204,24 @@ public class Mappings {
     public void clearStmtBlockMap() {
         clearMap(stmtBlockMap);
     }
+    /*
+     * Class-method signatures map.
+     */
+    public boolean setClassSigMap(JClass jclass, List<String> sigs) {
+        return setMap(classSigMap, jclass, sigs);
+    }
+    public Optional<List<String>> getClassSigMap(JClass jclass) {
+        return getFromMap(classSigMap, jclass);
+    }
 
+    /*
+     * Class-owned methods map.
+     */
+    public boolean setClassMethodMap(JClass jclass, List<JMethod> methods) {
+        return setMap(classMethodMap, jclass, methods);
+    }
+    public Optional<List<JMethod>> getClassMethodMap(JClass jclass) {
+        return getFromMap(classMethodMap, jclass);
+    }
 
 }

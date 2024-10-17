@@ -28,6 +28,7 @@ import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
 import org.bytedeco.llvm.global.LLVM;
 
+import prism.jellyfish.util.JavaUtil;
 import prism.llvm.LLVMCodeGen;
 import prism.jellyfish.util.AssertUtil;
 import prism.jellyfish.util.StringUtil;
@@ -61,10 +62,38 @@ public class JellyFish extends ProgramAnalysis<Void> {
         logger.atLevel(Level.INFO);
     }
 
+    /*
+    Entry Point
+     */
     @Override
     public Void analyze() {
+
+        synthesizeLayout();
+//        translateClasses();
+//        generateLLVMBitcode();
+        return null;
+    }
+
+    public void synthesizeLayout() {
+        List<JClass> jclasses = classHierarchy.allClasses().toList();
+        for (JClass jclass : jclasses) {
+            // CALLABLE SIGNATURES:
+            List<String> sigs = Reflections.getMethods(jclass).map(JMethod::getSubsignature).map(Subsignature::toString).toList();
+            maps.setClassSigMap(jclass, sigs);
+
+            // OWNED METHODS:
+            if(jclass.isAbstract()) {
+                maps.setClassMethodMap(jclass, List.of());
+            } else {
+                List<JMethod> methods = Reflections.getMethods(jclass).map(JMethod::getRef).map(ref -> classHierarchy.dispatch(jclass, ref)).filter(m -> m != null).toList();
+                maps.setClassMethodMap(jclass, methods);
+            }
+
+        }
+    }
+
+    public void translateClasses() {
         List<JClass> jclasses = classHierarchy.applicationClasses().toList();
-//        List<JClass> jclasses = classHierarchy.allClasses().toList();
         for (JClass jclass : jclasses) {
             String className = jclass.getName();
             String moduleName = jclass.getModuleName();
@@ -87,12 +116,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 break;
             }
         }
-
-
-        codeGen.generate();
-        return null;
     }
 
+    public void generateLLVMBitcode() {
+        codeGen.verify();
+        codeGen.generate();
+    }
 
     /*
      * Mappings between Java and LLVM
@@ -1136,7 +1165,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                  *     F(B1, B2...)
                  *   F::T1->T2  B::T3 B2...::T4
                  * ---------------------------
-                 *     T3 = T1   T4 = T2
+                 *     T3 = T1   T4 = T2 ...
                  */
                 LLVMTypeRef funcType = getFuncType(callee);
                 as.assertTrue(LLVM.LLVMCountParamTypes(funcType) == ((InvokeInstanceExp) jexp).getArgCount() + 1,
@@ -1338,6 +1367,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public LLVMValueRef resolveMethod(Var base, Subsignature sig) {
+        /*
+         * Given the base variable (of a specific class)
+         * Find the exact JMethod that conforms the signature
+         */
         Type baseType = base.getType();
         if (baseType instanceof ArrayType) {
             JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
@@ -1357,7 +1390,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
             curClass = curClass.getSuperClass();
         }
-        as.assertTrue(nearestMethod != null, "There should at least one method for sig: {}.", sig);
+
+        as.assertTrue(nearestMethod != null, "There should at least one method for sig: {}. Class: {}", sig, baseClass);
 
         // Check if it's a direct call:
         if (!isVirtualMethod(nearestMethod)) {
@@ -1405,5 +1439,4 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
         return funcPtr;
     }
-
 }

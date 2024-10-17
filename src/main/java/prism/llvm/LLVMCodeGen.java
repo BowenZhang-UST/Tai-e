@@ -48,11 +48,14 @@ public class LLVMCodeGen {
     /*
      * Top-level commands
      */
-    public void generate() {
+
+    public void verify() {
         byte[] errMsg = new byte[4096];
         int ret = LLVM.LLVMVerifyModule(module, LLVM.LLVMPrintMessageAction, errMsg);
         as.assertTrue(ret == 0, "Verify module failed: {}", String.valueOf(errMsg));
+    }
 
+    public void generate() {
         LLVM.LLVMWriteBitcodeToFile(module, bcFile);
     }
 
