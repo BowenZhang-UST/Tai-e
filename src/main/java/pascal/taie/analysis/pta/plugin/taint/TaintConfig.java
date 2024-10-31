@@ -39,13 +39,13 @@ import pascal.taie.language.classes.ClassHierarchy;
 import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
+import pascal.taie.language.classes.SignatureMatcher;
 import pascal.taie.language.type.ArrayType;
 import pascal.taie.language.type.ClassType;
 import pascal.taie.language.type.Type;
 import pascal.taie.language.type.TypeSystem;
 import pascal.taie.util.collection.Lists;
 
-import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -174,12 +174,12 @@ record TaintConfig(List<Source> sources,
      */
     private static class Deserializer extends JsonDeserializer<TaintConfig> {
 
-        private final ClassHierarchy hierarchy;
+        private final SignatureMatcher matcher;
 
         private final TypeSystem typeSystem;
 
         private Deserializer(ClassHierarchy hierarchy, TypeSystem typeSystem) {
-            this.hierarchy = hierarchy;
+            this.matcher = new SignatureMatcher(hierarchy);
             this.typeSystem = typeSystem;
         }
 
@@ -207,93 +207,91 @@ record TaintConfig(List<Source> sources,
          */
         private List<Source> deserializeSources(JsonNode node) {
             if (node instanceof ArrayNode arrayNode) {
-                List<Source> sources = new ArrayList<>(arrayNode.size());
+                List<Source> result = new ArrayList<>();
                 for (JsonNode elem : arrayNode) {
                     JsonNode sourceKind = elem.get("kind");
-                    Source source;
+                    List<? extends Source> sources;
                     if (sourceKind != null) {
-                        source = switch (sourceKind.asText()) {
-                            case "call" -> deserializeCallSource(elem);
-                            case "param" -> deserializeParamSource(elem);
-                            case "field" -> deserializeFieldSource(elem);
+                        sources = switch (sourceKind.asText()) {
+                            case "call" -> deserializeCallSources(elem);
+                            case "param" -> deserializeParamSources(elem);
+                            case "field" -> deserializeFieldSources(elem);
                             default -> {
                                 logger.warn("Unknown source kind \"{}\" in {}",
                                         sourceKind.asText(), elem.toString());
-                                yield null;
+                                yield List.of();
                             }
                         };
                     } else {
                         logger.warn("Ignore {} due to missing source \"kind\"",
                                 elem.toString());
-                        source = null;
+                        sources = List.of();
                     }
-                    if (source != null) {
-                        sources.add(source);
-                    }
+                    result.addAll(sources);
                 }
-                return Collections.unmodifiableList(sources);
+                return Collections.unmodifiableList(result);
             } else {
                 // if node is not an instance of ArrayNode, just return an empty set.
                 return List.of();
             }
         }
 
-        @Nullable
-        private CallSource deserializeCallSource(JsonNode node) {
+        private List<CallSource> deserializeCallSources(JsonNode node) {
+            String rawEntry = node.toString();
             String methodSig = node.get("method").asText();
-            JMethod method = hierarchy.getMethod(methodSig);
-            if (method != null) {
+            List<CallSource> result = matcher.getMethods(methodSig).stream().map(method -> {
                 IndexRef indexRef = toIndexRef(method, node.get("index").asText());
                 JsonNode typeNode = node.get("type");
                 Type type = (typeNode != null)
                         ? typeSystem.getType(typeNode.asText())
                         // type not given, retrieve it from method signature
                         : getMethodType(method, indexRef.index());
-                return new CallSource(method, indexRef, type);
-            } else {
-                // if the method (given in config file) is absent in
-                // the class hierarchy, just ignore it.
+                return new CallSource(method, indexRef, type, rawEntry);
+            }).toList();
+            if (result.isEmpty()) {
+                // if we do not find matched methods with the signature
+                // given in config file, just ignore it.
                 logger.warn("Cannot find source method '{}'", methodSig);
-                return null;
             }
+            return result;
         }
 
-        @Nullable
-        private ParamSource deserializeParamSource(JsonNode node) {
+        private List<ParamSource> deserializeParamSources(JsonNode node) {
+            String rawEntry = node.toString();
             String methodSig = node.get("method").asText();
-            JMethod method = hierarchy.getMethod(methodSig);
-            if (method != null) {
+            List<ParamSource> result = matcher.getMethods(methodSig).stream().map(method -> {
                 IndexRef indexRef = toIndexRef(method, node.get("index").asText());
                 JsonNode typeNode = node.get("type");
                 Type type = (typeNode != null)
                         ? typeSystem.getType(typeNode.asText())
                         // type not given, retrieve it from method signature
                         : getMethodType(method, indexRef.index());
-                return new ParamSource(method, indexRef, type);
-            } else {
-                // if the method (given in config file) is absent in
-                // the class hierarchy, just ignore it.
+                return new ParamSource(method, indexRef, type, rawEntry);
+            }).toList();
+            if (result.isEmpty()) {
+                // if we do not find matched methods with the signature
+                // given in config file, just ignore it.
                 logger.warn("Cannot find source method '{}'", methodSig);
-                return null;
             }
+            return result;
         }
 
-        @Nullable
-        private FieldSource deserializeFieldSource(JsonNode node) {
+        private List<FieldSource> deserializeFieldSources(JsonNode node) {
+            String rawEntry = node.toString();
             String fieldSig = node.get("field").asText();
-            JField field = hierarchy.getField(fieldSig);
-            if (field != null) {
+            List<FieldSource> result = matcher.getFields(fieldSig).stream().map(field -> {
                 JsonNode typeNode = node.get("type");
                 Type type = (typeNode != null)
                         ? typeSystem.getType(typeNode.asText())
                         : field.getType(); // type not given, use field type
-                return new FieldSource(field, type);
-            } else {
-                // if the field (given in config file) is absent in
-                // the class hierarchy, just ignore it.
+                return new FieldSource(field, type, rawEntry);
+            }).toList();
+            if (result.isEmpty()) {
+                // if we do not find matched fields with the signature
+                // given in config file, just ignore it.
                 logger.warn("Cannot find source field '{}'", fieldSig);
-                return null;
             }
+            return result;
         }
 
         /**
@@ -316,20 +314,22 @@ record TaintConfig(List<Source> sources,
          */
         private List<Sink> deserializeSinks(JsonNode node) {
             if (node instanceof ArrayNode arrayNode) {
-                List<Sink> sinks = new ArrayList<>(arrayNode.size());
+                List<Sink> result = new ArrayList<>();
                 for (JsonNode elem : arrayNode) {
+                    String rawEntry = elem.toString();
                     String methodSig = elem.get("method").asText();
-                    JMethod method = hierarchy.getMethod(methodSig);
-                    if (method != null) {
-                        // if the method (given in config file) is absent in
-                        // the class hierarchy, just ignore it.
+                    List<Sink> sinks = matcher.getMethods(methodSig).stream().map(method -> {
                         IndexRef indexRef = toIndexRef(method, elem.get("index").asText());
-                        sinks.add(new Sink(method, indexRef));
-                    } else {
+                        return new Sink(method, indexRef, rawEntry);
+                    }).toList();
+                    if (sinks.isEmpty()) {
+                        // if we do not find matched methods with the signature
+                        // given in config file, just ignore it.
                         logger.warn("Cannot find sink method '{}'", methodSig);
                     }
+                    result.addAll(sinks);
                 }
-                return Collections.unmodifiableList(sinks);
+                return Collections.unmodifiableList(result);
             } else {
                 // if node is not an instance of ArrayNode, just return an empty set.
                 return List.of();
@@ -345,13 +345,11 @@ record TaintConfig(List<Source> sources,
          */
         private List<TaintTransfer> deserializeTransfers(JsonNode node) {
             if (node instanceof ArrayNode arrayNode) {
-                List<TaintTransfer> transfers = new ArrayList<>(arrayNode.size());
+                List<TaintTransfer> result = new ArrayList<>();
                 for (JsonNode elem : arrayNode) {
+                    String rawEntry = elem.toString();
                     String methodSig = elem.get("method").asText();
-                    JMethod method = hierarchy.getMethod(methodSig);
-                    if (method != null) {
-                        // if the method (given in config file) is absent in
-                        // the class hierarchy, just ignore it.
+                    List<TaintTransfer> transfers = matcher.getMethods(methodSig).stream().map(method -> {
                         IndexRef from = toIndexRef(method, elem.get("from").asText());
                         IndexRef to = toIndexRef(method, elem.get("to").asText());
                         JsonNode typeNode = elem.get("type");
@@ -367,12 +365,16 @@ record TaintConfig(List<Source> sources,
                                 case FIELD -> to.field().getType();
                             };
                         }
-                        transfers.add(new TaintTransfer(method, from, to, type));
-                    } else {
+                        return new TaintTransfer(method, from, to, type, rawEntry);
+                    }).toList();
+                    if (transfers.isEmpty()) {
+                        // if we do not find matched methods with the signature
+                        // given in config file, just ignore it.
                         logger.warn("Cannot find taint-transfer method '{}'", methodSig);
                     }
+                    result.addAll(transfers);
                 }
-                return Collections.unmodifiableList(transfers);
+                return Collections.unmodifiableList(result);
             } else {
                 // if node is not an instance of ArrayNode, just return an empty set.
                 return List.of();
@@ -432,18 +434,19 @@ record TaintConfig(List<Source> sources,
          */
         private List<ParamSanitizer> deserializeSanitizers(JsonNode node) {
             if (node instanceof ArrayNode arrayNode) {
-                List<ParamSanitizer> sanitizers = new ArrayList<>(arrayNode.size());
+                List<ParamSanitizer> result = new ArrayList<>();
                 for (JsonNode elem : arrayNode) {
                     String methodSig = elem.get("method").asText();
-                    JMethod method = hierarchy.getMethod(methodSig);
-                    if (method != null) {
+                    List<ParamSanitizer> sanitizers = matcher.getMethods(methodSig).stream().map(method -> {
                         int index = InvokeUtils.toInt(elem.get("index").asText());
-                        sanitizers.add(new ParamSanitizer(method, index));
-                    } else {
+                        return new ParamSanitizer(method, index);
+                    }).toList();
+                    if (sanitizers.isEmpty()) {
                         logger.warn("Cannot find sanitizer method '{}'", methodSig);
                     }
+                    result.addAll(sanitizers);
                 }
-                return Collections.unmodifiableList(sanitizers);
+                return Collections.unmodifiableList(result);
             } else {
                 // if node is not an instance of ArrayNode, just return an empty set.
                 return List.of();

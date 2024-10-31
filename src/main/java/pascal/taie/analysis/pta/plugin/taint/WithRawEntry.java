@@ -22,14 +22,14 @@
 
 package pascal.taie.analysis.pta.plugin.taint;
 
-import pascal.taie.language.classes.JField;
-import pascal.taie.language.type.Type;
+/**
+ * Represents an entity that provides a raw entry. Implementing classes
+ * should provide the raw entry as a string via the {@code rawEntry()} method.
+ */
+interface WithRawEntry {
 
-record FieldSource(JField field, Type type, String rawEntry)
-        implements Source {
-
-    @Override
-    public String toString() {
-        return String.format("FieldSource{%s(%s)}", field, type);
-    }
+    /**
+     * @return the raw entry of this source in the taint configuration file.
+     */
+    String rawEntry();
 }
