@@ -1,8 +1,7 @@
 package prism.jellyfish;
-
-
 import org.apache.logging.log4j.Level;
-import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import pascal.taie.World;
 import pascal.taie.analysis.ProgramAnalysis;
 import pascal.taie.analysis.graph.cfg.CFG;
@@ -18,24 +17,20 @@ import pascal.taie.ir.proginfo.MethodRef;
 import pascal.taie.config.AnalysisConfig;
 import pascal.taie.util.AnalysisException;
 import pascal.taie.util.collection.Pair;
-
-import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.LogManager;
-
 import java.util.*;
-
 import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
 import org.bytedeco.llvm.global.LLVM;
-
-import prism.jellyfish.util.JavaUtil;
+import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
+import prism.jellyfish.synthesis.*;
 import prism.llvm.LLVMCodeGen;
+import static prism.llvm.LLVMUtil.*;
 import prism.jellyfish.util.AssertUtil;
 import prism.jellyfish.util.StringUtil;
-
 import javax.annotation.Nullable;
-
-import static prism.llvm.LLVMUtil.*;
+import com.google.gson.*;
+import java.io.FileWriter;
+import java.io.IOException;
 
 
 public class JellyFish extends ProgramAnalysis<Void> {
@@ -68,27 +63,42 @@ public class JellyFish extends ProgramAnalysis<Void> {
     @Override
     public Void analyze() {
 
-        synthesizeLayout();
+        if(!synthesizeLayout()) return null;
 //        translateClasses();
 //        generateLLVMBitcode();
         return null;
     }
 
-    public void synthesizeLayout() {
+    public boolean synthesizeLayout() {
         List<JClass> jclasses = classHierarchy.allClasses().toList();
+        List<JellyClass> jellyClasses = new ArrayList<>();
         for (JClass jclass : jclasses) {
-            // CALLABLE SIGNATURES:
-            List<String> sigs = Reflections.getMethods(jclass).map(JMethod::getSubsignature).map(Subsignature::toString).toList();
-            maps.setClassSigMap(jclass, sigs);
-
-            // OWNED METHODS:
-            if(jclass.isAbstract()) {
-                maps.setClassMethodMap(jclass, List.of());
-            } else {
-                List<JMethod> methods = Reflections.getMethods(jclass).map(JMethod::getRef).map(ref -> classHierarchy.dispatch(jclass, ref)).filter(m -> m != null).toList();
-                maps.setClassMethodMap(jclass, methods);
+            List<String> callableSigs = Reflections.getMethods(jclass).map(JMethod::getSubsignature).map(Subsignature::toString).toList();
+            if(jclass.isInterface()) {
+                logger.info("name: {}, super: {}", jclass.getName(), jclass.getDeclaredMethods());
+//                logger.info("is interface: {}, super: {}, sigs: {}", jclass.isInterface(), jclass.getSuperClass().getName(), callableSigs);
             }
-
+            List<JMethod> ownedMethods;
+            if(jclass.isAbstract()) {
+                ownedMethods = List.of();
+            } else {
+                ownedMethods = Reflections.getMethods(jclass).map(JMethod::getRef).map(ref -> classHierarchy.dispatch(jclass, ref)).filter(m -> m != null).toList();
+            }
+            String kindName = jclass.isInterface()? "interface": "class";
+            String className = jclass.getName();
+            String superName = jclass.getSuperClass() == null? "" : jclass.getSuperClass().getName();
+            List<String> interfaces = jclass.getInterfaces().stream().map(JClass::getName).toList();
+            List<JellyMethod> jellyMethods = ownedMethods.stream().map(m-> new JellyMethod(m.getSubsignature().toString(), m.getDeclaringClass().getName(), m.getSignature())).toList();
+            JellyClass jellyClass = new JellyClass(kindName, className, superName, callableSigs, interfaces, jellyMethods);
+            jellyClasses.add(jellyClass);
+        }
+        try (FileWriter writer = new FileWriter("output/oo.json")) {
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            gson.toJson(jellyClasses, writer);
+            return true;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
         }
     }
 

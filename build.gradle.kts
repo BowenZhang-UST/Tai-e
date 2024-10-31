@@ -33,6 +33,8 @@ dependencies {
 
     // https://mvnrepository.com/artifact/org.bytedeco/llvm-platform
     implementation("org.bytedeco:llvm-platform:12.0.1-1.5.6")
+    // https://mvnrepository.com/artifact/com.google.code.gson/gson
+    implementation("com.google.code.gson:gson:2.11.0")
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")

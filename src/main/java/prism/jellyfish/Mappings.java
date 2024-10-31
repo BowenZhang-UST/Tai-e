@@ -34,7 +34,7 @@ public class Mappings {
     public HashMap<JMethod, Integer> virtualMethodMap;
     public HashMap<String, LLVMValueRef> stringPoolMap;
     public HashMap<Stmt, LLVMBasicBlockRef> stmtBlockMap;
-    public HashMap<JClass, List<String>> classSigMap;
+    public HashMap<JClass, List<Subsignature>> classSigMap;
     public HashMap<JClass, List<JMethod>> classMethodMap;
 
     public Mappings() {
@@ -207,10 +207,10 @@ public class Mappings {
     /*
      * Class-method signatures map.
      */
-    public boolean setClassSigMap(JClass jclass, List<String> sigs) {
+    public boolean setClassSigMap(JClass jclass, List<Subsignature> sigs) {
         return setMap(classSigMap, jclass, sigs);
     }
-    public Optional<List<String>> getClassSigMap(JClass jclass) {
+    public Optional<List<Subsignature>> getClassSigMap(JClass jclass) {
         return getFromMap(classSigMap, jclass);
     }
 
