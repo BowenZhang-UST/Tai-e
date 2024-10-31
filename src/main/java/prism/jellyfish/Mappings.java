@@ -204,12 +204,14 @@ public class Mappings {
     public void clearStmtBlockMap() {
         clearMap(stmtBlockMap);
     }
+
     /*
      * Class-method signatures map.
      */
     public boolean setClassSigMap(JClass jclass, List<Subsignature> sigs) {
         return setMap(classSigMap, jclass, sigs);
     }
+
     public Optional<List<Subsignature>> getClassSigMap(JClass jclass) {
         return getFromMap(classSigMap, jclass);
     }
@@ -220,6 +222,7 @@ public class Mappings {
     public boolean setClassMethodMap(JClass jclass, List<JMethod> methods) {
         return setMap(classMethodMap, jclass, methods);
     }
+
     public Optional<List<JMethod>> getClassMethodMap(JClass jclass) {
         return getFromMap(classMethodMap, jclass);
     }

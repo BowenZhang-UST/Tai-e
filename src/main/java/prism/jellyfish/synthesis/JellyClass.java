@@ -9,6 +9,7 @@ public class JellyClass {
     private List<String> callableSigs;
     private List<String> interfaces;
     private List<JellyMethod> ownedMethods;
+
     public JellyClass(String kind, String name, String superName, List<String> callableSigs, List<String> interfaces, List<JellyMethod> ownedMethods) {
         this.kind = kind;
         this.name = name;

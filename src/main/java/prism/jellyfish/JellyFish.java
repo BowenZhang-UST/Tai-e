@@ -1,4 +1,5 @@
 package prism.jellyfish;
+
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
@@ -17,18 +18,25 @@ import pascal.taie.ir.proginfo.MethodRef;
 import pascal.taie.config.AnalysisConfig;
 import pascal.taie.util.AnalysisException;
 import pascal.taie.util.collection.Pair;
+
 import java.util.*;
+
 import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
 import org.bytedeco.llvm.global.LLVM;
 import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
 import prism.jellyfish.synthesis.*;
 import prism.llvm.LLVMCodeGen;
+
 import static prism.llvm.LLVMUtil.*;
+
 import prism.jellyfish.util.AssertUtil;
 import prism.jellyfish.util.StringUtil;
+
 import javax.annotation.Nullable;
+
 import com.google.gson.*;
+
 import java.io.FileWriter;
 import java.io.IOException;
 
@@ -63,7 +71,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     @Override
     public Void analyze() {
 
-        if(!synthesizeLayout()) return null;
+        if (!synthesizeLayout()) return null;
 //        translateClasses();
 //        generateLLVMBitcode();
         return null;
@@ -74,21 +82,21 @@ public class JellyFish extends ProgramAnalysis<Void> {
         List<JellyClass> jellyClasses = new ArrayList<>();
         for (JClass jclass : jclasses) {
             List<String> callableSigs = Reflections.getMethods(jclass).map(JMethod::getSubsignature).map(Subsignature::toString).toList();
-            if(jclass.isInterface()) {
-                logger.info("name: {}, super: {}", jclass.getName(), jclass.getDeclaredMethods());
+            if (jclass.isInterface() && jclass.getSuperClass().getName() == "java.lang.Object") {
+                logger.info("name: {}, methods: {}", jclass.getName(), jclass.getDeclaredMethods());
 //                logger.info("is interface: {}, super: {}, sigs: {}", jclass.isInterface(), jclass.getSuperClass().getName(), callableSigs);
             }
             List<JMethod> ownedMethods;
-            if(jclass.isAbstract()) {
+            if (jclass.isAbstract()) {
                 ownedMethods = List.of();
             } else {
                 ownedMethods = Reflections.getMethods(jclass).map(JMethod::getRef).map(ref -> classHierarchy.dispatch(jclass, ref)).filter(m -> m != null).toList();
             }
-            String kindName = jclass.isInterface()? "interface": "class";
+            String kindName = jclass.isInterface() ? "interface" : "class";
             String className = jclass.getName();
-            String superName = jclass.getSuperClass() == null? "" : jclass.getSuperClass().getName();
+            String superName = jclass.getSuperClass() == null ? "" : jclass.getSuperClass().getName();
             List<String> interfaces = jclass.getInterfaces().stream().map(JClass::getName).toList();
-            List<JellyMethod> jellyMethods = ownedMethods.stream().map(m-> new JellyMethod(m.getSubsignature().toString(), m.getDeclaringClass().getName(), m.getSignature())).toList();
+            List<JellyMethod> jellyMethods = ownedMethods.stream().map(m -> new JellyMethod(m.getSubsignature().toString(), m.getDeclaringClass().getName(), m.getSignature())).toList();
             JellyClass jellyClass = new JellyClass(kindName, className, superName, callableSigs, interfaces, jellyMethods);
             jellyClasses.add(jellyClass);
         }
