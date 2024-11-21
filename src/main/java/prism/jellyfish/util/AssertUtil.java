@@ -2,9 +2,6 @@ package prism.jellyfish.util;
 
 import org.apache.logging.log4j.Logger;
 
-import java.text.MessageFormat;
-import java.util.regex.Pattern;
-
 public class AssertUtil {
     Logger logger;
 

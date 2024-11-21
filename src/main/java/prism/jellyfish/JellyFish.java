@@ -1,44 +1,42 @@
 package prism.jellyfish;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
+import org.bytedeco.llvm.LLVM.LLVMTypeRef;
+import org.bytedeco.llvm.LLVM.LLVMValueRef;
+import org.bytedeco.llvm.global.LLVM;
 import pascal.taie.World;
 import pascal.taie.analysis.ProgramAnalysis;
 import pascal.taie.analysis.graph.cfg.CFG;
 import pascal.taie.analysis.graph.cfg.CFGBuilder;
 import pascal.taie.analysis.graph.cfg.CFGEdge;
+import pascal.taie.config.AnalysisConfig;
 import pascal.taie.ir.IR;
 import pascal.taie.ir.exp.*;
+import pascal.taie.ir.proginfo.FieldRef;
+import pascal.taie.ir.proginfo.MethodRef;
 import pascal.taie.ir.stmt.*;
 import pascal.taie.language.classes.*;
 import pascal.taie.language.type.*;
-import pascal.taie.ir.proginfo.FieldRef;
-import pascal.taie.ir.proginfo.MethodRef;
-import pascal.taie.config.AnalysisConfig;
 import pascal.taie.util.AnalysisException;
 import pascal.taie.util.collection.Pair;
-
-import java.util.*;
-
-import org.bytedeco.llvm.LLVM.LLVMTypeRef;
-import org.bytedeco.llvm.LLVM.LLVMValueRef;
-import org.bytedeco.llvm.global.LLVM;
-import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
-import prism.jellyfish.synthesis.*;
+import prism.jellyfish.synthesis.JellyClass;
+import prism.jellyfish.synthesis.JellyMethod;
+import prism.jellyfish.synthesis.SynthesisResult;
+import prism.jellyfish.util.AssertUtil;
+import prism.jellyfish.util.JavaUtil;
+import prism.jellyfish.util.StringUtil;
 import prism.llvm.LLVMCodeGen;
 
-import static prism.llvm.LLVMUtil.*;
-
-import prism.jellyfish.util.AssertUtil;
-import prism.jellyfish.util.StringUtil;
-
 import javax.annotation.Nullable;
+import java.io.*;
+import java.util.*;
 
-import com.google.gson.*;
-
-import java.io.FileWriter;
-import java.io.IOException;
+import static prism.llvm.LLVMUtil.*;
 
 
 public class JellyFish extends ProgramAnalysis<Void> {
@@ -51,6 +49,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     LLVMCodeGen codeGen;
     Mappings maps;
     AnalysisConfig config;
+    SynthesisResult synRes;
 
 
     public JellyFish(AnalysisConfig config) {
@@ -71,27 +70,21 @@ public class JellyFish extends ProgramAnalysis<Void> {
     @Override
     public Void analyze() {
 
-        if (!synthesizeLayout()) return null;
-//        translateClasses();
-//        generateLLVMBitcode();
+        if (!synthesizeLayout()) {
+            logger.info("synthesis failed");
+            return null;
+        }
+        translateClasses();
+        generateLLVMBitcode();
         return null;
     }
 
-    public boolean synthesizeLayout() {
+    private boolean _persistClassInfo() {
         List<JClass> jclasses = classHierarchy.allClasses().toList();
         List<JellyClass> jellyClasses = new ArrayList<>();
         for (JClass jclass : jclasses) {
-            List<String> callableSigs = Reflections.getMethods(jclass).map(JMethod::getSubsignature).map(Subsignature::toString).toList();
-            if (jclass.isInterface() && jclass.getSuperClass().getName() == "java.lang.Object") {
-                logger.info("name: {}, methods: {}", jclass.getName(), jclass.getDeclaredMethods());
-//                logger.info("is interface: {}, super: {}, sigs: {}", jclass.isInterface(), jclass.getSuperClass().getName(), callableSigs);
-            }
-            List<JMethod> ownedMethods;
-            if (jclass.isAbstract()) {
-                ownedMethods = List.of();
-            } else {
-                ownedMethods = Reflections.getMethods(jclass).map(JMethod::getRef).map(ref -> classHierarchy.dispatch(jclass, ref)).filter(m -> m != null).toList();
-            }
+            List<String> callableSigs = JavaUtil.getCallableSignatures(classHierarchy, jclass);
+            List<JMethod> ownedMethods = JavaUtil.getOwnedMethods(classHierarchy, jclass);
             String kindName = jclass.isInterface() ? "interface" : "class";
             String className = jclass.getName();
             String superName = jclass.getSuperClass() == null ? "" : jclass.getSuperClass().getName();
@@ -103,11 +96,51 @@ public class JellyFish extends ProgramAnalysis<Void> {
         try (FileWriter writer = new FileWriter("output/oo.json")) {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
             gson.toJson(jellyClasses, writer);
-            return true;
         } catch (IOException e) {
             e.printStackTrace();
             return false;
         }
+        return true;
+    }
+
+    private boolean _triggerSynthesizer() {
+        try {
+            ProcessBuilder processBuilder = new ProcessBuilder("python3", "chironex/python/main.py", "-i", "output/oo.json", "-o", "output/oo.o.json", "-g", "slot");
+            processBuilder.redirectErrorStream(true);
+            Process process = processBuilder.start();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    logger.info(line);
+                }
+            }
+            int retCode = process.waitFor();
+            logger.info("retCode: {}", retCode);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+        return true;
+    }
+
+    private boolean _loadSynthesisResult() {
+        try (FileReader reader = new FileReader("output/oo.o.json")) {
+            Gson gson = new GsonBuilder().create();
+            synRes = gson.fromJson(reader, SynthesisResult.class);
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+        return true;
+    }
+
+    public boolean synthesizeLayout() {
+//        if(!_persistClassInfo()) return false;
+//        if(!_triggerSynthesizer()) return false;
+        if (!_loadSynthesisResult()) return false;
+        return true;
+
+
     }
 
     public void translateClasses() {
@@ -119,6 +152,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             logger.debug("Init class: name: {}, module name: {}, simple name:{}", className, moduleName, simpleName);
             // Class
             LLVMTypeRef llvmClass = getOrTranClass(jclass, ClassStatus.DEP_METHOD_DEF);
+//            LLVMTypeRef llvmClass = getOrTranClass(jclass, ClassStatus.DEP_METHOD_DECL); // for testing
         }
 
         while (true) {
@@ -228,11 +262,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return opfieldIndex.get();
     }
 
-    public Optional<Integer> getOrTranVirtualMethod(JMethod jmethod) {
-        requireType(jmethod.getDeclaringClass().getType(), ClassStatus.DEP_FIELDS);
-        return maps.getVirtualMethodMap(jmethod);
-    }
-
     public LLVMValueRef getOrTranStringLiteral(String str) {
         /*
          * Trans:
@@ -332,21 +361,24 @@ public class JellyFish extends ProgramAnalysis<Void> {
         } else {
             fieldTypes.add(llvmObjClass);
         }
-        // 2. "sub pointer"
-        fieldTypes.add(llvmObjClass);
+        // 2. "interface field"
+        Collection<JClass> interfaces = jclass.getInterfaces();
+        for (JClass i : interfaces) {
+            LLVMTypeRef llvmInterface = tranTypeAlloc(i.getType(), ClassStatus.DEP_DECL);
+            maps.setInterfaceIndexMap(jclass, i, fieldTypes.size());
+            fieldTypes.add(llvmInterface);
+        }
 
         // 3. Virtual method Fields
-        Collection<JMethod> methods = jclass.getDeclaredMethods();
+        List<JMethod> methods = JavaUtil.getCallableMethodTypes(classHierarchy, jclass);
         for (JMethod method : methods) {
-            if (!isRootVirtualMethod(method)) {
-                continue;
+            if (synRes.shouldContainSlot(jclass, method)) {
+                LLVMTypeRef funcType = tranMethodType(method);
+                LLVMTypeRef funcPtrType = codeGen.buildPointerType(funcType);
+                boolean ret = maps.setSlotIndexMap(jclass, method.getSubsignature(), fieldTypes.size());
+                as.assertTrue(ret, "The slot {} of class {} has been duplicate translated", method.getSubsignature(), jclass);
+                fieldTypes.add(funcPtrType);
             }
-            LLVMTypeRef funcType = tranMethodType(method);
-            LLVMTypeRef funcPtrType = codeGen.buildPointerType(funcType);
-
-            boolean ret = maps.setVirtualMethodMap(method, fieldTypes.size());
-            as.assertTrue(ret, "The method {} has been duplicate translated", method);
-            fieldTypes.add(funcPtrType);
         }
 
         // 4. Static and Member Fields
@@ -1347,113 +1379,43 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return ptr;
     }
 
-    public boolean isRootVirtualMethod(JMethod jmethod) {
-        if (!isVirtualMethod(jmethod)) {
-            return false;
-        }
-
-        JClass declClass = jmethod.getDeclaringClass();
-        Subsignature sig = jmethod.getSubsignature();
-        JClass curSuperClass = declClass.getSuperClass();
-        while (curSuperClass != null) {
-            JMethod smethod = curSuperClass.getDeclaredMethod(sig);
-            if (smethod != null) {
-                return false;
-            }
-            curSuperClass = curSuperClass.getSuperClass();
-        }
-        return true;
-    }
-
-    public boolean isVirtualMethod(JMethod jmethod) {
-        if (jmethod.isStatic() || jmethod.isConstructor()) {
-            return false;
-        }
-        JClass declClass = jmethod.getDeclaringClass();
-        Subsignature sig = jmethod.getSubsignature();
-        Collection<JClass> subClasses = classHierarchy.getAllSubclassesOf(declClass);
-        for (JClass subClass : subClasses) {
-            if (subClass.equals(declClass)) {
-                continue;
-            }
-            JMethod candidate = subClass.getDeclaredMethod(sig);
-            if (candidate != null) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public LLVMValueRef resolveMethod(Var base, Subsignature sig) {
         /*
-         * Given the base variable (of a specific class)
-         * Find the exact JMethod that conforms the signature
+         * Virtual call resolution
          */
         Type baseType = base.getType();
         if (baseType instanceof ArrayType) {
             JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
             baseType = objClass.getType();
         }
-
         as.assertTrue(baseType instanceof ClassType, "The base var should be ClassType. Got {}. On sig: {}. ", baseType, sig);
-        JClass baseClass = ((ClassType) baseType).getJClass();
+        JClass jclass = ((ClassType) baseType).getJClass();
+        JClass container = synRes.getLoadContainer(jclass, sig, classHierarchy);
+        if (container == null) { // direct call
+            JMethod direct = jclass.getDeclaredMethod(sig);
+            as.assertTrue(direct != null, "Should not be null, sig: {}", sig);
+            return getOrTranMethodDecl(direct);
+        }
 
-        JClass curClass = baseClass;
-        JMethod nearestMethod = null;
-        while (curClass != null) {
-            JMethod declaredMethod = curClass.getDeclaredMethod(sig);
-            if (declaredMethod != null) {
-                nearestMethod = declaredMethod;
-                break;
+        List<JClass> trace = JavaUtil.getTraceBetween(classHierarchy, jclass, container);
+        List<Integer> indexes = new ArrayList<>();
+        indexes.add(0);
+        JClass lastClass = jclass;
+        for (int i = 1; i < trace.size(); i++) {
+            JClass curClass = trace.get(i);
+            Integer index = null;
+            if (curClass == lastClass.getSuperClass()) {
+                index = 0;
+            } else {
+                index = maps.getInterfaceIndexMap(lastClass, curClass).get();
             }
-            curClass = curClass.getSuperClass();
+            indexes.add(index);
         }
-
-        as.assertTrue(nearestMethod != null, "There should at least one method for sig: {}. Class: {}", sig, baseClass);
-
-        // Check if it's a direct call:
-        if (!isVirtualMethod(nearestMethod)) {
-            return getOrTranMethodDecl(nearestMethod);
-        }
-
-        // Otherwise, translate the virtual call by finding the root virtual method:
-        JClass curClass2 = baseClass;
-        Integer indexFuncPtr = null;
-        int steps = 0;
-        while (curClass2 != null) {
-            requireType(curClass2.getType(), ClassStatus.DEP_FIELDS);
-            JMethod candidate = curClass2.getDeclaredMethod(sig);
-            if (candidate != null) {
-                Optional<Integer> opIndex = getOrTranVirtualMethod(candidate);
-                if (opIndex.isPresent()) {
-                    indexFuncPtr = opIndex.get();
-                    break;
-                }
-            }
-            curClass2 = curClass2.getSuperClass();
-            steps += 1;
-        }
-        as.assertTrue(curClass2 != null,
-                "Unexpected class hierarchy. The virtual method is not found. Base class: {}, sig: {}", baseClass, sig);
-        as.assertTrue(indexFuncPtr != null,
-                "The index is not found.");
-
+        indexes.add(maps.getSlotIndexMap(container, sig).get());
+        List<LLVMValueRef> gepIndexes = indexes.stream().map(
+                i -> codeGen.buildConstInt(codeGen.buildIntType(32), i)).toList();
         LLVMValueRef llvmVar = tranRValueCast(base, tranType(baseType, ClassStatus.DEP_FIELDS));
-        List<LLVMValueRef> indexes = new ArrayList<>();
-
-        for (int i = 0; i < steps + 1; i++) {
-            indexes.add(
-                    codeGen.buildConstInt(
-                            codeGen.buildIntType(32),
-                            0
-                    )
-            );
-        }
-        indexes.add(codeGen.buildConstInt(
-                codeGen.buildIntType(32),
-                indexFuncPtr.intValue()
-        ));
-        LLVMValueRef funcPtrPtr = codeGen.buildGEP(llvmVar, indexes);
+        LLVMValueRef funcPtrPtr = codeGen.buildGEP(llvmVar, gepIndexes);
         LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
         return funcPtr;
     }

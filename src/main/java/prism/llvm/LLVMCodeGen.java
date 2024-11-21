@@ -4,24 +4,17 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bytedeco.llvm.LLVM.*;
 import org.bytedeco.llvm.global.LLVM;
-
 import pascal.taie.util.collection.Pair;
-
-import javax.annotation.Nullable;
-
-import static prism.llvm.LLVMUtil.getValueType;
-import static prism.llvm.LLVMUtil.getLLVMStr;
-import static prism.llvm.LLVMUtil.getFuncType;
-import static prism.llvm.LLVMUtil.getParamTypes;
-
-
 import prism.jellyfish.util.ArrayBuilder;
 import prism.jellyfish.util.AssertUtil;
 import prism.jellyfish.util.StringUtil;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+
+import static prism.llvm.LLVMUtil.*;
 
 
 public class LLVMCodeGen {
@@ -39,7 +32,7 @@ public class LLVMCodeGen {
 
     public LLVMCodeGen() {
         this.moduleName = "module";
-        this.bcFile = "out.bc";
+        this.bcFile = "output/out.bc";
         this.context = LLVM.LLVMContextCreate();
         this.module = LLVM.LLVMModuleCreateWithNameInContext(moduleName, context);
         this.builder = LLVM.LLVMCreateBuilderInContext(context);

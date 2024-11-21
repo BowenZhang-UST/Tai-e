@@ -4,22 +4,20 @@ package prism.jellyfish;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
+import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.classes.JClass;
-
-import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.classes.Subsignature;
+import prism.jellyfish.JellyFish.ClassStatus;
 import prism.jellyfish.util.AssertUtil;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
-
-import prism.jellyfish.JellyFish.ClassStatus;
 
 public class Mappings {
     private static final Logger logger = LogManager.getLogger(Mappings.class);
@@ -31,7 +29,8 @@ public class Mappings {
     public HashMap<Var, LLVMValueRef> varMap;
     public HashMap<JField, LLVMValueRef> staticFieldMap;
     public HashMap<JField, Integer> memberFieldMap;
-    public HashMap<JMethod, Integer> virtualMethodMap;
+    public HashMap<String, Integer> slotIndexMap;
+    public HashMap<String, Integer> interfaceIndexMap;
     public HashMap<String, LLVMValueRef> stringPoolMap;
     public HashMap<Stmt, LLVMBasicBlockRef> stmtBlockMap;
     public HashMap<JClass, List<Subsignature>> classSigMap;
@@ -44,7 +43,8 @@ public class Mappings {
         this.varMap = new HashMap<>();
         this.staticFieldMap = new HashMap<>();
         this.memberFieldMap = new HashMap<>();
-        this.virtualMethodMap = new HashMap<>();
+        this.interfaceIndexMap = new HashMap<>();
+        this.slotIndexMap = new HashMap<>();
         this.stringPoolMap = new HashMap<>();
         this.stmtBlockMap = new HashMap<>();
         this.classSigMap = new HashMap<>();
@@ -167,14 +167,25 @@ public class Mappings {
     }
 
     /*
-     * Virtual method map.
+     * Slot index map. <className::sig> -> index of function pointer
      */
-    public boolean setVirtualMethodMap(JMethod jmethod, Integer index) {
-        return setMap(virtualMethodMap, jmethod, index);
+    public boolean setSlotIndexMap(JClass jclass, Subsignature sig, Integer index) {
+        return setMap(slotIndexMap, jclass.getName() + "::" + sig.toString(), index);
     }
 
-    public Optional<Integer> getVirtualMethodMap(JMethod jmethod) {
-        return getFromMap(virtualMethodMap, jmethod);
+    public Optional<Integer> getSlotIndexMap(JClass jclass, Subsignature sig) {
+        return getFromMap(slotIndexMap, jclass.getName() + "::" + sig.toString());
+    }
+
+    /*
+     * Interface index map. <class::interface> -> index of interface
+     */
+    public boolean setInterfaceIndexMap(JClass jclass, JClass i, Integer index) {
+        return setMap(interfaceIndexMap, jclass.getName() + "=>" + i.getName(), index);
+    }
+
+    public Optional<Integer> getInterfaceIndexMap(JClass jclass, JClass i) {
+        return getFromMap(interfaceIndexMap, jclass.getName() + "=>" + i.getName());
     }
 
     /*

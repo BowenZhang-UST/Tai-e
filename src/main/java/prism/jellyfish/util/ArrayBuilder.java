@@ -1,10 +1,10 @@
 package prism.jellyfish.util;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import org.bytedeco.javacpp.Pointer;
 import org.bytedeco.javacpp.PointerPointer;
+
+import java.util.ArrayList;
+import java.util.List;
 
 
 public class ArrayBuilder<T extends Pointer> {
