@@ -26,6 +26,7 @@ public class LLVMCodeGen {
     LLVMContextRef context;
     LLVMModuleRef module;
     LLVMBuilderRef builder;
+    LLVMDIBuilderRef debugInfoBuilder;
 
     private static final Logger logger = LogManager.getLogger(LLVMCodeGen.class);
     private static final AssertUtil as = new AssertUtil(logger);
@@ -36,6 +37,7 @@ public class LLVMCodeGen {
         this.context = LLVM.LLVMContextCreate();
         this.module = LLVM.LLVMModuleCreateWithNameInContext(moduleName, context);
         this.builder = LLVM.LLVMCreateBuilderInContext(context);
+        this.debugInfoBuilder = LLVM.LLVMCreateDIBuilder(module);
     }
 
     /*
@@ -74,6 +76,10 @@ public class LLVMCodeGen {
 
     public void setInsertBlock(LLVMBasicBlockRef block) {
         LLVM.LLVMPositionBuilderAtEnd(builder, block);
+    }
+
+    public void setDebugLocation(int line, String className) {
+        // TODO:
     }
 
     /*

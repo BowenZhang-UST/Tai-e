@@ -8,6 +8,7 @@ import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.classes.Subsignature;
 import prism.jellyfish.util.AssertUtil;
 
+import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
 
@@ -35,6 +36,18 @@ public class SynthesisResult {
             return null;
         }
         return ch.getClass(sig2Container.get(sig));
+    }
+
+    @Nullable
+    public List<JClass> getStoreContainers(JClass jclass, Subsignature subSig, ClassHierarchy ch) {
+        String className = jclass.getName();
+        String sig = subSig.toString();
+        as.assertTrue(storingPaths.containsKey(className), "Should contain the class {} for sig {}", className, sig);
+        Map<String, List<String>> sig2Containers = storingPaths.get(className);
+        if (!sig2Containers.containsKey(sig)) {
+            return List.of();
+        }
+        return sig2Containers.get(sig).stream().map(s -> ch.getClass(s)).toList();
     }
 
 }

@@ -546,7 +546,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
             return;
         }
 
-        // We create an entry block contains all Tai-e variables
+        // We create an entry block contains all Tai-e variables,
+        // as well as the storing paths of virtual functions (if it's an init function)
         LLVMBasicBlockRef entryBlock = codeGen.addBasicBlock(llvmFunc, "entry");
         codeGen.setInsertBlock(entryBlock);
         List<Var> vars = ir.getVars();
@@ -558,6 +559,25 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMValueRef alloca = codeGen.buildAlloca(llvmVarType, llvmVarName);
             boolean ret = maps.setVarMap(var, alloca);
             as.assertTrue(ret, "The var {} has been duplicate translated.", var);
+        }
+        if (jmethod.getName().equals("<init>")) {
+            JClass jclass = jmethod.getDeclaringClass();
+            Var thisVar = ir.getThis();
+            LLVMValueRef thisPtr = tranRValue(thisVar, tranType(jclass.getType(), ClassStatus.DEP_METHOD_DECL));
+            for (JMethod owned : JavaUtil.getOwnedMethods(classHierarchy, jclass)) {
+                Subsignature sig = owned.getSubsignature();
+                List<JClass> toStores = synRes.getStoreContainers(jclass, sig, classHierarchy);
+                for (JClass toStore : toStores) {
+                    requireType(toStore.getType(), ClassStatus.DEP_FIELDS);
+                    Optional<Integer> lastIndex = maps.getSlotIndexMap(toStore, sig);
+                    as.assertTrue(lastIndex.isPresent(), "The container {} should have a slot for sig {}", toStore.getName(), sig);
+                    LLVMValueRef gep = buildGEPtoContainerSlot(jclass, toStore, thisPtr, lastIndex.get());
+                    requireType(owned.getDeclaringClass().getType(), ClassStatus.DEP_METHOD_DECL);
+                    LLVMValueRef funcPtr = maps.getMethodMap(owned).get();
+                    codeGen.buildStore(gep, funcPtr);
+                }
+            }
+
         }
 
 
@@ -573,7 +593,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMBasicBlockRef bb = codeGen.addBasicBlock(llvmFunc, "bb");
             maps.setStmtBlockMap(jstmt, bb);
         }
-
         // Statement translation:
         // In this process,
         // the edges related to control flow stmts will be constructed.
@@ -646,7 +665,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     @Nullable
     public List<LLVMValueRef> tranStmt(Stmt jstmt, JMethod jmethod, CFG<Stmt> cfg) {
         List<LLVMValueRef> resInsts = new ArrayList<>();
-
+        codeGen.setDebugLocation(jstmt.getLineNumber(), jmethod.getDeclaringClass().getName());
         if (jstmt instanceof DefinitionStmt) { // Abstract
             if (jstmt instanceof AssignStmt) { // Abstract
                 // We don't traverse each concrete assign types.
@@ -1379,6 +1398,29 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return ptr;
     }
 
+    public LLVMValueRef buildGEPtoContainerSlot(JClass jclass, JClass container, LLVMValueRef gepBase, Integer slotIndex) {
+        List<JClass> trace = JavaUtil.getTraceBetween(classHierarchy, jclass, container);
+        List<Integer> indexes = new ArrayList<>();
+        indexes.add(0);
+        JClass lastClass = jclass;
+        for (int i = 1; i < trace.size(); i++) {
+            JClass curClass = trace.get(i);
+            Integer index = null;
+            requireType(lastClass.getType(), ClassStatus.DEP_FIELDS);
+            if (curClass == lastClass.getSuperClass()) {
+                index = 0;
+            } else {
+                index = maps.getInterfaceIndexMap(lastClass, curClass).get();
+            }
+            indexes.add(index);
+            lastClass = curClass;
+        }
+        indexes.add(slotIndex);
+        List<LLVMValueRef> gepIndexes = indexes.stream().map(
+                i -> codeGen.buildConstInt(codeGen.buildIntType(32), i)).toList();
+        return codeGen.buildGEP(gepBase, gepIndexes);
+    }
+
     public LLVMValueRef resolveMethod(Var base, Subsignature sig) {
         /*
          * Virtual call resolution
@@ -1393,29 +1435,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
         JClass container = synRes.getLoadContainer(jclass, sig, classHierarchy);
         if (container == null) { // direct call
             JMethod direct = jclass.getDeclaredMethod(sig);
-            as.assertTrue(direct != null, "Should not be null, sig: {}", sig);
+            as.assertTrue(direct != null, "Direct method call {}::{} should be resolved but failed.", jclass, sig);
             return getOrTranMethodDecl(direct);
         }
 
-        List<JClass> trace = JavaUtil.getTraceBetween(classHierarchy, jclass, container);
-        List<Integer> indexes = new ArrayList<>();
-        indexes.add(0);
-        JClass lastClass = jclass;
-        for (int i = 1; i < trace.size(); i++) {
-            JClass curClass = trace.get(i);
-            Integer index = null;
-            if (curClass == lastClass.getSuperClass()) {
-                index = 0;
-            } else {
-                index = maps.getInterfaceIndexMap(lastClass, curClass).get();
-            }
-            indexes.add(index);
-        }
-        indexes.add(maps.getSlotIndexMap(container, sig).get());
-        List<LLVMValueRef> gepIndexes = indexes.stream().map(
-                i -> codeGen.buildConstInt(codeGen.buildIntType(32), i)).toList();
         LLVMValueRef llvmVar = tranRValueCast(base, tranType(baseType, ClassStatus.DEP_FIELDS));
-        LLVMValueRef funcPtrPtr = codeGen.buildGEP(llvmVar, gepIndexes);
+        LLVMValueRef funcPtrPtr = buildGEPtoContainerSlot(jclass, container, llvmVar, maps.getSlotIndexMap(container, sig).get());
         LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
         return funcPtr;
     }
