@@ -22,22 +22,22 @@ public class LLVMCodeGen {
      * Provide manipulations to a LLVM module.
      */
     String moduleName;
-    String bcFile;
+    String outputPrefix;
     LLVMContextRef context;
     LLVMModuleRef module;
     LLVMBuilderRef builder;
-    LLVMDIBuilderRef debugInfoBuilder;
 
     private static final Logger logger = LogManager.getLogger(LLVMCodeGen.class);
     private static final AssertUtil as = new AssertUtil(logger);
 
     public LLVMCodeGen() {
         this.moduleName = "module";
-        this.bcFile = "output/out.bc";
+        this.outputPrefix = "output/out";
         this.context = LLVM.LLVMContextCreate();
         this.module = LLVM.LLVMModuleCreateWithNameInContext(moduleName, context);
         this.builder = LLVM.LLVMCreateBuilderInContext(context);
-        this.debugInfoBuilder = LLVM.LLVMCreateDIBuilder(module);
+        LLVM.LLVMInitializeCore(LLVM.LLVMGetGlobalPassRegistry());
+        LLVM.LLVMInitializeScalarOpts(LLVM.LLVMGetGlobalPassRegistry());
     }
 
     /*
@@ -50,8 +50,17 @@ public class LLVMCodeGen {
         as.assertTrue(ret == 0, "Verify module failed: {}", String.valueOf(errMsg));
     }
 
+    public void optimize() {
+        LLVMPassManagerRef passManager = LLVM.LLVMCreatePassManager();
+        LLVM.LLVMAddPromoteMemoryToRegisterPass(passManager);
+
+        int res = LLVM.LLVMRunPassManager(passManager, module);
+        as.assertTrue(res == 1, "Mem2reg optimization failed.");
+        LLVM.LLVMDisposePassManager(passManager);
+    }
+
     public void generate() {
-        LLVM.LLVMWriteBitcodeToFile(module, bcFile);
+        LLVM.LLVMWriteBitcodeToFile(module, outputPrefix + ".bc");
     }
 
     /*

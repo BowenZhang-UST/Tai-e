@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.core.config.Configurator;
 import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
 import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
@@ -44,6 +45,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
     private static final Logger logger = LogManager.getLogger(JellyFish.class);
     private static final AssertUtil as = new AssertUtil(logger);
 
+    private static final Level DEBUG_LEVEL = Level.DEBUG;
+
     World world;
     ClassHierarchy classHierarchy;
     LLVMCodeGen codeGen;
@@ -54,14 +57,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     public JellyFish(AnalysisConfig config) {
         super(config);
-        logger.info("Jellyfish is a transpiler from Tai-e IR to LLVM IR.");
         this.config = config;
         this.world = World.get();
         this.classHierarchy = world.getClassHierarchy();
         this.codeGen = new LLVMCodeGen();
         this.maps = new Mappings();
-
-        logger.atLevel(Level.INFO);
+        Configurator.setAllLevels(LogManager.getRootLogger().getName(), DEBUG_LEVEL);
     }
 
     /*
@@ -69,12 +70,15 @@ public class JellyFish extends ProgramAnalysis<Void> {
      */
     @Override
     public Void analyze() {
-
+        logger.info("Jellyfish is a transpiler from Tai-e IR to LLVM IR.");
+        logger.info("Phase 1: synthesize layout.");
         if (!synthesizeLayout()) {
             logger.info("synthesis failed");
             return null;
         }
+        logger.info("Phase 2: translate the classes.");
         translateClasses();
+        logger.info("Phase 3: apply optimization and generate bitcode.");
         generateLLVMBitcode();
         return null;
     }
@@ -149,10 +153,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
             String className = jclass.getName();
             String moduleName = jclass.getModuleName();
             String simpleName = jclass.getSimpleName();
-            logger.debug("Init class: name: {}, module name: {}, simple name:{}", className, moduleName, simpleName);
             // Class
             LLVMTypeRef llvmClass = getOrTranClass(jclass, ClassStatus.DEP_METHOD_DEF);
-//            LLVMTypeRef llvmClass = getOrTranClass(jclass, ClassStatus.DEP_METHOD_DECL); // for testing
         }
 
         while (true) {
@@ -172,6 +174,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     public void generateLLVMBitcode() {
         codeGen.verify();
+        codeGen.optimize();
         codeGen.generate();
     }
 
@@ -524,7 +527,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
 //            return;
 //        }
 
-        logger.debug("*Method: {}. In Class: {}", jmethod.getName(), jmethod.getDeclaringClass());
         Optional<LLVMValueRef> opllvmFunc = maps.getMethodMap(jmethod);
         as.assertTrue(opllvmFunc.isPresent(), "The decl of jmethod {} should have be translated", jmethod);
         LLVMValueRef llvmFunc = opllvmFunc.get();
@@ -574,7 +576,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     LLVMValueRef gep = buildGEPtoContainerSlot(jclass, toStore, thisPtr, lastIndex.get());
                     requireType(owned.getDeclaringClass().getType(), ClassStatus.DEP_METHOD_DECL);
                     LLVMValueRef funcPtr = maps.getMethodMap(owned).get();
-                    codeGen.buildStore(gep, funcPtr);
+                    LLVMTypeRef tarFuncPtrType = codeGen.buildPointerType(tranMethodType(toStore.getDeclaredMethod(sig)));
+                    codeGen.buildStore(gep, codeGen.buildTypeCast(funcPtr, tarFuncPtrType));
                 }
             }
 
@@ -597,13 +600,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
         // In this process,
         // the edges related to control flow stmts will be constructed.
         for (Stmt jstmt : jstmts) {
-            logger.debug("**Stmt: {}", jstmt);
             LLVMBasicBlockRef bb = maps.getStmtBlockMap(jstmt).get();
             codeGen.setInsertBlock(bb);
             List<LLVMValueRef> llvmInsts = this.tranStmt(jstmt, jmethod, cfg);
 
             List<String> llvmInstStrs = llvmInsts.stream().map(inst -> getLLVMStr(inst)).toList();
-            for (String str : llvmInstStrs) logger.debug("  => {}", str);
         }
         // The exit stmt is a nop.
         // So we should add an unreachable to the corresponding BB,
@@ -616,11 +617,15 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMBasicBlockRef bb = maps.getStmtBlockMap(jstmt).get();
             LLVMValueRef lastInst = LLVM.LLVMGetLastInstruction(bb);
             if (LLVM.LLVMIsATerminatorInst(lastInst) != null) {
+                Set<CFGEdge<Stmt>> outEdges = cfg.getOutEdgesOf(jstmt);
+                logger.debug("control-flow stmt: {}.\n   Out edges: {}", jstmt, outEdges);
                 continue;
             }
             // TODO: handle exception flows.
+            //       by using @class ExceptionEntry.
             Set<CFGEdge<Stmt>> outEdges = cfg.getOutEdgesOf(jstmt);
             as.assertTrue(outEdges.size() > 0, "Zero out edges for stmt {}", jstmt);
+            logger.debug("non control-flow stmt: {}.\n    Out edges: {}", jstmt, outEdges);
             for (CFGEdge<Stmt> outEdge : outEdges) {
                 CFGEdge.Kind outKind = outEdge.getKind();
                 if (outKind == CFGEdge.Kind.FALL_THROUGH) {
