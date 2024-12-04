@@ -18,6 +18,7 @@ import pascal.taie.analysis.graph.cfg.CFGEdge;
 import pascal.taie.config.AnalysisConfig;
 import pascal.taie.ir.IR;
 import pascal.taie.ir.exp.*;
+import pascal.taie.ir.proginfo.ExceptionEntry;
 import pascal.taie.ir.proginfo.FieldRef;
 import pascal.taie.ir.proginfo.MethodRef;
 import pascal.taie.ir.stmt.*;
@@ -612,20 +613,16 @@ public class JellyFish extends ProgramAnalysis<Void> {
         codeGen.setInsertBlock(exitBB);
         codeGen.buildUnreachable();
 
-        // Handle the normal basic blocks without a terminator instructions
+        // Handle those basic blocks without a terminator instructions
         for (Stmt jstmt : jstmts) {
             LLVMBasicBlockRef bb = maps.getStmtBlockMap(jstmt).get();
             LLVMValueRef lastInst = LLVM.LLVMGetLastInstruction(bb);
             if (LLVM.LLVMIsATerminatorInst(lastInst) != null) {
                 Set<CFGEdge<Stmt>> outEdges = cfg.getOutEdgesOf(jstmt);
-                logger.debug("control-flow stmt: {}.\n   Out edges: {}", jstmt, outEdges);
                 continue;
             }
-            // TODO: handle exception flows.
-            //       by using @class ExceptionEntry.
             Set<CFGEdge<Stmt>> outEdges = cfg.getOutEdgesOf(jstmt);
-            as.assertTrue(outEdges.size() > 0, "Zero out edges for stmt {}", jstmt);
-            logger.debug("non control-flow stmt: {}.\n    Out edges: {}", jstmt, outEdges);
+            as.assertTrue(outEdges.size() == 1, "# of out edges != 1 for stmt {}. edges: {}", jstmt, outEdges);
             for (CFGEdge<Stmt> outEdge : outEdges) {
                 CFGEdge.Kind outKind = outEdge.getKind();
                 if (outKind == CFGEdge.Kind.FALL_THROUGH) {
@@ -646,6 +643,43 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 }
                 break;
             }
+        }
+
+        // Handle the exception entries
+        HashMap<Stmt, List<Stmt>> end2Handlers = new HashMap<>();
+        for (ExceptionEntry ee : ir.getExceptionEntries()) {
+            // merge the handlers with the same end stmt
+            Stmt endStmt = ir.getStmt(ee.end().getIndex() - 1);
+
+            if (!end2Handlers.containsKey(endStmt)) {
+                List<Stmt> handlers = new ArrayList<>();
+                end2Handlers.put(endStmt, handlers);
+            }
+            end2Handlers.get(endStmt).add(ee.handler());
+        }
+        for (Map.Entry<Stmt, List<Stmt>> entry : end2Handlers.entrySet()) {
+            Stmt theEnd = entry.getKey();
+            List<Stmt> theHandlers = entry.getValue();
+            LLVMBasicBlockRef endBlock = maps.getStmtBlockMap(theEnd).get();
+            List<LLVMBasicBlockRef> handlerBlocks = theHandlers.stream().map(h -> maps.getStmtBlockMap(h).get()).toList();
+            LLVMValueRef lastInst = LLVM.LLVMGetLastInstruction(endBlock);
+            as.assertTrue(LLVM.LLVMIsATerminatorInst(lastInst) != null, "For jstmt {}, the last inst should be a terminator. Got {}", theEnd, getLLVMStr(lastInst));
+            // put the original last inst in a new block
+            LLVM.LLVMInstructionRemoveFromParent(lastInst);
+            LLVMBasicBlockRef bb4LastInst = codeGen.addBasicBlock(llvmFunc, "bb");
+            codeGen.setInsertBlock(bb4LastInst);
+            codeGen.insertInst(lastInst);
+
+            // create a switch instruction that dispatch the handlers & original target
+            codeGen.setInsertBlock(endBlock);
+            LLVMValueRef rolldice = codeGen.buildRolldice();
+            List<Pair<LLVMValueRef, LLVMBasicBlockRef>> caseTargetPairs = new ArrayList<>();
+            for (int i = 0; i < handlerBlocks.size(); i++) {
+                LLVMValueRef caseVal = codeGen.buildConstInt(codeGen.buildIntType(32), i);
+                LLVMBasicBlockRef handlerBlock = handlerBlocks.get(i);
+                caseTargetPairs.add(new Pair<>(caseVal, handlerBlock));
+            }
+            codeGen.buildSwitch(rolldice, caseTargetPairs, bb4LastInst);
         }
 
         // connect the entry to the real entry stmt

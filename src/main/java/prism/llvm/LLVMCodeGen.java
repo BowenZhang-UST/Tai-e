@@ -87,6 +87,12 @@ public class LLVMCodeGen {
         LLVM.LLVMPositionBuilderAtEnd(builder, block);
     }
 
+    public void insertInst(LLVMValueRef inst) {
+        // Insert an instruction to the current insertion block
+        LLVM.LLVMInsertIntoBuilder(builder, inst);
+
+    }
+
     public void setDebugLocation(int line, String className) {
         // TODO:
     }
@@ -590,7 +596,8 @@ public class LLVMCodeGen {
         JELLYFISH_CLASS("jellyfish.class"),
         JELLYFISH_METHODTYPE("jellyfish.methodtype"),
         JELLYFISH_CATCH("jellyfish.catch"),
-        JELLYFISH_THROW("jellyfish.throw");
+        JELLYFISH_THROW("jellyfish.throw"),
+        JELLYFISH_ROLLDICE("jellyfish.rolldice");
         private final String name;
 
         IntrinsicID(String name) {
@@ -614,23 +621,17 @@ public class LLVMCodeGen {
             case JELLYFISH_MONITOR_ENTER: {
             }
             case JELLYFISH_MONITOR_EXIT: {
+            }
+            case JELLYFISH_ROLLDICE: {
                 return String.format("%s", ID.getName());
             }
             case JELLYFISH_INSTANCEOF: {
-                String uuid = (String) params[0];
-                return String.format("%s.%s", ID.getName(), uuid);
             }
             case JELLYFISH_CLASS: {
-                String uuid = (String) params[0];
-                return String.format("%s.%s", ID.getName(), uuid);
             }
             case JELLYFISH_METHODTYPE: {
-                String uuid = (String) params[0];
-                return String.format("%s.%s", ID.getName(), uuid);
             }
             case JELLYFISH_CATCH: {
-                String uuid = (String) params[0];
-                return String.format("%s.%s", ID.getName(), uuid);
             }
             case JELLYFISH_THROW: {
                 String uuid = (String) params[0];
@@ -747,6 +748,15 @@ public class LLVMCodeGen {
                         List.of(throwedType)
                 );
                 LLVMValueRef ret = this.addFunction(jellyfishCatchTy, intrinsicName);
+                return ret;
+            }
+            case JELLYFISH_ROLLDICE: {
+                // i32 jellyfish.rolldice()
+                LLVMTypeRef jellyfishRolldiceTy = buildFunctionType(
+                        buildIntType(32),
+                        List.of()
+                );
+                LLVMValueRef ret = this.addFunction(jellyfishRolldiceTy, intrinsicName);
                 return ret;
             }
         }
@@ -873,6 +883,15 @@ public class LLVMCodeGen {
                 List.of(throwed)
         );
         return theThrow;
+    }
+
+    public LLVMValueRef buildRolldice() {
+        LLVMValueRef jellyfishRolldice = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_ROLLDICE);
+        LLVMValueRef theRolldice = buildCall(
+                jellyfishRolldice,
+                List.of()
+        );
+        return theRolldice;
     }
 
 
