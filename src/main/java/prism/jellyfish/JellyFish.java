@@ -586,7 +586,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 continue;
             }
             Set<CFGEdge<Stmt>> outEdges = cfg.getOutEdgesOf(jstmt);
-            as.assertTrue(outEdges.size() == 1, "# of out edges != 1 for stmt {}. edges: {}", jstmt, outEdges);
+//            as.assertTrue(outEdges.size() == 1, "# of out edges != 1 for stmt {}. edges: {}", jstmt, outEdges);
+            if(outEdges.size() > 1) {
+                logger.debug("# of out edges != 1 for stmt {}. edges: {}", jstmt, outEdges);
+            }
             for (CFGEdge<Stmt> outEdge : outEdges) {
                 CFGEdge.Kind outKind = outEdge.getKind();
                 if (outKind == CFGEdge.Kind.FALL_THROUGH) {
@@ -595,13 +598,15 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     LLVMBasicBlockRef fallthrough = maps.getStmtBlockMap(target).get();
                     codeGen.buildUncondBr(fallthrough);
                 } else if (outKind == CFGEdge.Kind.UNCAUGHT_EXCEPTION) {
-                    codeGen.setInsertBlock(bb);
-                    codeGen.buildUncondBr(exitBB);
+                    continue;
+//                    codeGen.setInsertBlock(bb);
+//                    codeGen.buildUncondBr(exitBB);
                 } else if (outKind == CFGEdge.Kind.CAUGHT_EXCEPTION) {
-                    codeGen.setInsertBlock(bb);
-                    Stmt target = outEdge.target();
-                    LLVMBasicBlockRef handler = maps.getStmtBlockMap(target).get();
-                    codeGen.buildUncondBr(handler);
+                    continue;
+//                    codeGen.setInsertBlock(bb);
+//                    Stmt target = outEdge.target();
+//                    LLVMBasicBlockRef handler = maps.getStmtBlockMap(target).get();
+//                    codeGen.buildUncondBr(handler);
                 } else {
                     as.unreachable("The other kinds are unexpected. edge: {}. Last Inst: {}", outEdge, getLLVMStr(lastInst));
                 }
