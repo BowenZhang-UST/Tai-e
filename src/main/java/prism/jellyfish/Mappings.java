@@ -174,7 +174,6 @@ public class Mappings {
     }
 
     public Optional<Integer> getSlotIndexMap(JClass jclass, Subsignature sig) {
-        as.assertTrue(slotIndexMap.containsKey(jclass.getName() + "::" + sig.toString()), "The key {} doesn't exist", jclass.getName() + "::" + sig.toString());
         return getFromMap(slotIndexMap, jclass.getName() + "::" + sig.toString());
     }
 
