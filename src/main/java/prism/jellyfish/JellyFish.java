@@ -73,10 +73,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     public Void analyze() {
         logger.info("Jellyfish is a transpiler from Tai-e IR to LLVM IR.");
         logger.info("Phase 1: synthesize layout.");
-        if (!synthesizeLayout()) {
-            logger.info("synthesis failed");
-            return null;
-        }
+        synthesizeLayout();
         logger.info("Phase 2: translate the classes.");
         translateClasses();
         logger.info("Phase 3: apply optimization and generate bitcode.");
@@ -139,13 +136,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return true;
     }
 
-    public boolean synthesizeLayout() {
-//        if(!_persistClassInfo()) return false;
-//        if(!_triggerSynthesizer()) return false;
-        if (!_loadSynthesisResult()) return false;
-        return true;
-
-
+    public void synthesizeLayout() {
+//        as.assertTrue(_persistClassInfo(), "Failed to persist class info");
+//        as.assertTrue(_triggerSynthesizer(), "Failed to perform synthesis");
+        as.assertTrue(_loadSynthesisResult(), "Failed to load synthesis result");
     }
 
     public void translateClasses() {
@@ -318,34 +312,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMValueRef phValue = codeGen.addGlobalVariable(classType, placeHolderValName);
         LLVM.LLVMSetLinkage(phValue, LLVM.LLVMExternalLinkage);
         return classType;
-        // After update: also translate the "relevant classes" by different types of reference
-//        // 1. Field reference
-//        Collection<JField> fields = jclass.getDeclaredFields();
-//        for (JField field : fields) {
-//            Type ftype = field.getType();
-//            if (ftype instanceof ClassType) {
-//                JClass fclass = ((ClassType) ftype).getJClass();
-//                LLVMTypeRef fllvmClass = getOrTranClass(fclass);
-//            }
-//        }
-//
-//        // 2. Super class reference
-//        List<JClass> superClasses = new ArrayList<>();
-//        JClass supClass = jclass.getSuperClass();
-//        while (supClass != null) {
-//            superClasses.add(supClass);
-//            supClass = supClass.getSuperClass();
-//        }
-//        for (JClass superClass : superClasses) {
-//            LLVMTypeRef llvmSClass = getOrTranClass(superClass);
-//        }
-//
-//        // 3. Interface reference
-//        Collection<JClass> jinterfaces = jclass.getInterfaces();
-//        for (JClass jinterface : jinterfaces) {
-//            LLVMTypeRef llvmInterface = getOrTranClass(jinterface);
-//        }
-
     }
 
     public void tranClassFields(JClass jclass) {
@@ -376,6 +342,9 @@ public class JellyFish extends ProgramAnalysis<Void> {
         // 3. Virtual method Fields
         List<JMethod> methods = JavaUtil.getCallableMethodTypes(classHierarchy, jclass);
         for (JMethod method : methods) {
+            if (jclass.getName().equals("java.io.Flushable")) {
+                logger.info("Testing {}", method.getSignature());
+            }
             if (synRes.shouldContainSlot(jclass, method)) {
                 LLVMTypeRef funcType = tranMethodType(method);
                 LLVMTypeRef funcPtrType = codeGen.buildPointerType(funcType);
@@ -522,11 +491,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public void tranMethodBody(JMethod jmethod) {
-        // TODO: enable all methods after the tool is mature
-//        if (!jmethod.getName().equals("<clinit>")) {
-//            // Debug use: Skip non-class-init method
-//            return;
-//        }
 
         Optional<LLVMValueRef> opllvmFunc = maps.getMethodMap(jmethod);
         as.assertTrue(opllvmFunc.isPresent(), "The decl of jmethod {} should have be translated", jmethod);
@@ -1479,6 +1443,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         }
 
         LLVMValueRef llvmVar = tranRValueCast(base, tranType(baseType, ClassStatus.DEP_FIELDS));
+        requireType(container.getType(), ClassStatus.DEP_FIELDS);
         LLVMValueRef funcPtrPtr = buildGEPtoContainerSlot(jclass, container, llvmVar, maps.getSlotIndexMap(container, sig).get());
         LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
         return funcPtr;

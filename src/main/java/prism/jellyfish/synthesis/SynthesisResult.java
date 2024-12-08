@@ -23,7 +23,7 @@ public class SynthesisResult {
     public boolean shouldContainSlot(JClass jclass, JMethod jmethod) {
         String className = jclass.getName();
         String sig = jmethod.getSubsignature().toString();
-        as.assertTrue(memoryLayout.containsKey(className), "Should contain the class as key");
+        as.assertTrue(memoryLayout.containsKey(className), "Should contain the class {} as key", className);
         return memoryLayout.get(className).contains(sig);
     }
 
