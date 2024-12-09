@@ -33,6 +33,7 @@ import prism.jellyfish.util.AssertUtil;
 import prism.jellyfish.util.JavaUtil;
 import prism.jellyfish.util.StringUtil;
 import prism.llvm.LLVMCodeGen;
+import prism.llvm.LLVMUtil;
 
 import javax.annotation.Nullable;
 import java.io.*;
@@ -85,7 +86,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         List<JClass> jclasses = classHierarchy.allClasses().toList();
         List<JellyClass> jellyClasses = new ArrayList<>();
         for (JClass jclass : jclasses) {
-            List<String> callableSigs = JavaUtil.getCallableSignatures(classHierarchy, jclass);
+            List<String> callableSigs = JavaUtil.getCallableSignatures(jclass);
             List<JMethod> ownedMethods = JavaUtil.getOwnedMethods(classHierarchy, jclass);
             String kindName = jclass.isInterface() ? "interface" : "class";
             String className = jclass.getName();
@@ -137,7 +138,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public void synthesizeLayout() {
-//        as.assertTrue(_persistClassInfo(), "Failed to persist class info");
+        as.assertTrue(_persistClassInfo(), "Failed to persist class info");
 //        as.assertTrue(_triggerSynthesizer(), "Failed to perform synthesis");
         as.assertTrue(_loadSynthesisResult(), "Failed to load synthesis result");
     }
@@ -340,11 +341,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
         }
 
         // 3. Virtual method Fields
-        List<JMethod> methods = JavaUtil.getCallableMethodTypes(classHierarchy, jclass);
+        List<JMethod> methods = JavaUtil.getCallableMethodTypes(jclass);
         for (JMethod method : methods) {
-            if (jclass.getName().equals("java.io.Flushable")) {
-                logger.info("Testing {}", method.getSignature());
-            }
             if (synRes.shouldContainSlot(jclass, method)) {
                 LLVMTypeRef funcType = tranMethodType(method);
                 LLVMTypeRef funcPtrType = codeGen.buildPointerType(funcType);
@@ -541,7 +539,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     LLVMValueRef gep = buildGEPtoContainerSlot(jclass, toStore, thisPtr, lastIndex.get());
                     requireType(owned.getDeclaringClass().getType(), ClassStatus.DEP_METHOD_DECL);
                     LLVMValueRef funcPtr = maps.getMethodMap(owned).get();
-                    LLVMTypeRef tarFuncPtrType = codeGen.buildPointerType(tranMethodType(toStore.getDeclaredMethod(sig)));
+                    LLVMTypeRef tarFuncPtrType = LLVM.LLVMGetElementType(getValueType(gep));
                     codeGen.buildStore(gep, codeGen.buildTypeCast(funcPtr, tarFuncPtrType));
                 }
             }
@@ -582,13 +580,13 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMBasicBlockRef bb = maps.getStmtBlockMap(jstmt).get();
             LLVMValueRef lastInst = LLVM.LLVMGetLastInstruction(bb);
             if (LLVM.LLVMIsATerminatorInst(lastInst) != null) {
-                Set<CFGEdge<Stmt>> outEdges = cfg.getOutEdgesOf(jstmt);
                 continue;
             }
             Set<CFGEdge<Stmt>> outEdges = cfg.getOutEdgesOf(jstmt);
-//            as.assertTrue(outEdges.size() == 1, "# of out edges != 1 for stmt {}. edges: {}", jstmt, outEdges);
-            if(outEdges.size() > 1) {
-                logger.debug("# of out edges != 1 for stmt {}. edges: {}", jstmt, outEdges);
+            if (outEdges.size() == 0) {
+                codeGen.setInsertBlock(bb);
+                codeGen.buildUnreachable();
+                continue;
             }
             for (CFGEdge<Stmt> outEdge : outEdges) {
                 CFGEdge.Kind outKind = outEdge.getKind();
@@ -598,15 +596,13 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     LLVMBasicBlockRef fallthrough = maps.getStmtBlockMap(target).get();
                     codeGen.buildUncondBr(fallthrough);
                 } else if (outKind == CFGEdge.Kind.UNCAUGHT_EXCEPTION) {
-                    continue;
-//                    codeGen.setInsertBlock(bb);
-//                    codeGen.buildUncondBr(exitBB);
+                    codeGen.setInsertBlock(bb);
+                    codeGen.buildUncondBr(exitBB);
                 } else if (outKind == CFGEdge.Kind.CAUGHT_EXCEPTION) {
-                    continue;
-//                    codeGen.setInsertBlock(bb);
-//                    Stmt target = outEdge.target();
-//                    LLVMBasicBlockRef handler = maps.getStmtBlockMap(target).get();
-//                    codeGen.buildUncondBr(handler);
+                    codeGen.setInsertBlock(bb);
+                    Stmt target = outEdge.target();
+                    LLVMBasicBlockRef handler = maps.getStmtBlockMap(target).get();
+                    codeGen.buildUncondBr(handler);
                 } else {
                     as.unreachable("The other kinds are unexpected. edge: {}. Last Inst: {}", outEdge, getLLVMStr(lastInst));
                 }
@@ -663,6 +659,14 @@ public class JellyFish extends ProgramAnalysis<Void> {
         if (!(entryStmt instanceof Nop)) {
             LLVMBasicBlockRef stmtEntryBlock = maps.getStmtBlockMap(entryStmt).get();
             codeGen.buildUncondBr(stmtEntryBlock);
+        }
+
+        for (Stmt jstmt : jstmts) {
+            LLVMBasicBlockRef blockRef = maps.getStmtBlockMap(jstmt).get();
+            LLVMValueRef lastOne = LLVM.LLVMGetLastInstruction(blockRef);
+            as.assertTrue(lastOne != null, "The translated block is null for stmt {}", jstmt);
+            as.assertTrue(LLVM.LLVMIsATerminatorInst(lastOne) != null, "for stmt {}, the last instruction is not terminator. Got: {}", jstmt, LLVMUtil.getLLVMStr(lastOne));
+
         }
 
         maps.clearVarMap();
@@ -1234,8 +1238,9 @@ public class JellyFish extends ProgramAnalysis<Void> {
             } else if (jexp instanceof InvokeInstanceExp) { // Abstract
                 Var baseVar = ((InvokeInstanceExp) jexp).getBase();
                 MethodRef methodRef = ((InvokeInstanceExp) jexp).getMethodRef();
+                JClass receiver = methodRef.getDeclaringClass();
                 Subsignature sig = methodRef.getSubsignature();
-                LLVMValueRef callee = resolveMethod(baseVar, sig);
+                LLVMValueRef callee = resolveMethod(baseVar, sig, receiver);
 
                 /*
                  * T-InvokeInstance:
@@ -1429,7 +1434,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return codeGen.buildGEP(gepBase, gepIndexes);
     }
 
-    public LLVMValueRef resolveMethod(Var base, Subsignature sig) {
+    public LLVMValueRef resolveMethod(Var base, Subsignature sig, JClass receiver) {
         /*
          * Virtual call resolution
          */
@@ -1442,9 +1447,38 @@ public class JellyFish extends ProgramAnalysis<Void> {
         JClass jclass = ((ClassType) baseType).getJClass();
         JClass container = synRes.getLoadContainer(jclass, sig, classHierarchy);
         if (container == null) { // direct call
-            JMethod direct = jclass.getDeclaredMethod(sig);
-            as.assertTrue(direct != null, "Direct method call {}::{} should be resolved but failed.", jclass, sig);
-            return getOrTranMethodDecl(direct);
+            if (!receiver.isInterface()) {
+                // if it's a class:
+                // then this direct call must be DEFINED within itself or its parents
+                JClass cur = receiver;
+                while (cur != null) {
+                    JMethod direct = cur.getDeclaredMethod(sig);
+                    if (direct != null) return getOrTranMethodDecl(direct);
+                    cur = cur.getSuperClass();
+                }
+            } else {
+                // if it's an interface
+                // it means that there is exactly one class that implements this method
+                Queue<JClass> worklist = new LinkedList<>();
+                worklist.add(receiver);
+                while (!worklist.isEmpty()) {
+                    JClass cur = worklist.poll();
+                    if (cur.isInterface()) {
+                        worklist.addAll(classHierarchy.getDirectSubinterfacesOf(cur));
+                        worklist.addAll(classHierarchy.getDirectImplementorsOf(cur));
+                    } else {
+                        JClass cur2 = cur;
+                        while (cur2 != null) {
+                            JMethod direct = cur2.getDeclaredMethod(sig);
+                            if (direct != null) return getOrTranMethodDecl(direct);
+                            cur2 = cur2.getSuperClass();
+                        }
+                    }
+
+                }
+            }
+
+            as.unreachable("Direct method not found for class: {}, receiver: {}, sig: {}", jclass, receiver, sig);
         }
 
         LLVMValueRef llvmVar = tranRValueCast(base, tranType(baseType, ClassStatus.DEP_FIELDS));

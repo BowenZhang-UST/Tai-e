@@ -530,6 +530,7 @@ public class LLVMCodeGen {
         } else if ((srcKind == LLVM.LLVMFloatTypeKind || srcKind == LLVM.LLVMDoubleTypeKind) &&
                 (tgtKind == LLVM.LLVMFloatTypeKind || tgtKind == LLVM.LLVMDoubleTypeKind)) {
             LLVMValueRef cast = LLVM.LLVMBuildFPCast(builder, val, targetType, "real2real");
+            return cast;
         } else if (srcKind == LLVM.LLVMIntegerTypeKind && (tgtKind == LLVM.LLVMFloatTypeKind || tgtKind == LLVM.LLVMDoubleTypeKind)) {
             LLVMValueRef cast = LLVM.LLVMBuildSIToFP(builder, val, targetType, "int2real");
             return cast;
