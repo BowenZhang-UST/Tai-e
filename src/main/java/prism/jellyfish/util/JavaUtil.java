@@ -2,7 +2,10 @@ package prism.jellyfish.util;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import pascal.taie.language.classes.*;
+import pascal.taie.language.classes.ClassHierarchy;
+import pascal.taie.language.classes.JClass;
+import pascal.taie.language.classes.JMethod;
+import pascal.taie.language.classes.Subsignature;
 import pascal.taie.util.collection.Sets;
 
 import java.util.*;
@@ -13,14 +16,10 @@ public class JavaUtil {
     private static final AssertUtil as = new AssertUtil(logger);
 
     private static Stream<JMethod> getCallablesImpl(JClass jclass) {
-        if (!jclass.isInterface()) {
-            return Reflections.getMethods(jclass);
-        }
         List<JMethod> methods = new ArrayList<>();
         Set<Subsignature> subSignatures = Sets.newHybridSet();
         Queue<JClass> worklist = new LinkedList<>();
         worklist.add(jclass);
-
         while (!worklist.isEmpty()) {
             JClass cur = worklist.poll();
             cur.getDeclaredMethods()
@@ -32,6 +31,9 @@ public class JavaUtil {
                         methods.add(m);
                         subSignatures.add(m.getSubsignature());
                     });
+            if (!cur.isInterface() && cur.getSuperClass() != null) {
+                worklist.add(cur.getSuperClass());
+            }
             cur.getInterfaces()
                     .stream()
                     .forEach(i -> worklist.add(i));

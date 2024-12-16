@@ -30,9 +30,9 @@ public class LLVMCodeGen {
     private static final Logger logger = LogManager.getLogger(LLVMCodeGen.class);
     private static final AssertUtil as = new AssertUtil(logger);
 
-    public LLVMCodeGen() {
-        this.moduleName = "module";
-        this.outputPrefix = "output/out";
+    public LLVMCodeGen(String moduleName, String outputPrefix) {
+        this.moduleName = moduleName;
+        this.outputPrefix = outputPrefix;
         this.context = LLVM.LLVMContextCreate();
         this.module = LLVM.LLVMModuleCreateWithNameInContext(moduleName, context);
         this.builder = LLVM.LLVMCreateBuilderInContext(context);

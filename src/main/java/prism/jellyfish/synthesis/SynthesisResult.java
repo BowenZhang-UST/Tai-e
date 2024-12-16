@@ -15,6 +15,7 @@ import java.util.Map;
 public class SynthesisResult {
     private Map<String, List<String>> memoryLayout;
     private Map<String, Map<String, String>> loadingPaths;
+    private Map<String, Map<String, String>> directPaths;
     private Map<String, Map<String, List<String>>> storingPaths;
 
     private static final Logger logger = LogManager.getLogger(SynthesisResult.class);
@@ -25,6 +26,20 @@ public class SynthesisResult {
         String sig = jmethod.getSubsignature().toString();
         as.assertTrue(memoryLayout.containsKey(className), "Should contain the class {} as key", className);
         return memoryLayout.get(className).contains(sig);
+    }
+
+    public JMethod getDirectTarget(JClass jclass, Subsignature subSig, ClassHierarchy ch) {
+        String className = jclass.getName();
+        String sig = subSig.toString();
+
+        as.assertTrue(directPaths.containsKey(className), "Should contain the class {} for sig", className, sig);
+        Map<String, String> sig2FullSig = directPaths.get(className);
+        if (!sig2FullSig.containsKey(sig)) { // indirect call
+            return null;
+        }
+        JMethod theMethod = ch.getMethod(sig2FullSig.get(sig));
+        as.assertTrue(theMethod != null, "We should find a method for jclass: {}, sig {}", jclass, sig);
+        return theMethod;
     }
 
     public JClass getLoadContainer(JClass jclass, Subsignature subSig, ClassHierarchy ch) {

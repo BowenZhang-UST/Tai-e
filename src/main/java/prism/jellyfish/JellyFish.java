@@ -16,6 +16,7 @@ import pascal.taie.analysis.graph.cfg.CFG;
 import pascal.taie.analysis.graph.cfg.CFGBuilder;
 import pascal.taie.analysis.graph.cfg.CFGEdge;
 import pascal.taie.config.AnalysisConfig;
+import pascal.taie.config.Options;
 import pascal.taie.ir.IR;
 import pascal.taie.ir.exp.*;
 import pascal.taie.ir.proginfo.ExceptionEntry;
@@ -37,6 +38,8 @@ import prism.llvm.LLVMUtil;
 
 import javax.annotation.Nullable;
 import java.io.*;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 
 import static prism.llvm.LLVMUtil.*;
@@ -62,9 +65,23 @@ public class JellyFish extends ProgramAnalysis<Void> {
         this.config = config;
         this.world = World.get();
         this.classHierarchy = world.getClassHierarchy();
-        this.codeGen = new LLVMCodeGen();
         this.maps = new Mappings();
+        // Set LLVMCodegen
+        Options options = this.world.getOptions();
+        if (options.getAppClassPath().size() > 0) {
+            String path2Jar = options.getAppClassPath().get(0);
+            Path path = Paths.get(path2Jar);
+            String jarFileName = path.getFileName().toString();
+            String outputPrefix = options.getOutputDir() + "/" + jarFileName.substring(0, jarFileName.length() - 4);
+            this.codeGen = new LLVMCodeGen(path2Jar, outputPrefix);
+        } else {
+            String path2Cp = options.getClassPath().get(0);
+            Path path = Paths.get(path2Cp);
+            String outputPrefix = options.getOutputDir() + "/" + path.getFileName().toString();
+            this.codeGen = new LLVMCodeGen(path2Cp, outputPrefix);
+        }
         Configurator.setAllLevels(LogManager.getRootLogger().getName(), DEBUG_LEVEL);
+
     }
 
     /*
@@ -118,7 +135,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 }
             }
             int retCode = process.waitFor();
-            logger.info("retCode: {}", retCode);
+            as.assertTrue(retCode == 0, "Error when triggering the synthesizer");
         } catch (Exception e) {
             e.printStackTrace();
             return false;
@@ -139,7 +156,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     public void synthesizeLayout() {
         as.assertTrue(_persistClassInfo(), "Failed to persist class info");
-//        as.assertTrue(_triggerSynthesizer(), "Failed to perform synthesis");
+        as.assertTrue(_triggerSynthesizer(), "Failed to perform synthesis");
         as.assertTrue(_loadSynthesisResult(), "Failed to load synthesis result");
     }
 
@@ -489,7 +506,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public void tranMethodBody(JMethod jmethod) {
-
+//        logger.debug("Handling method {}. Class: {}", jmethod, jmethod.getDeclaringClass());
         Optional<LLVMValueRef> opllvmFunc = maps.getMethodMap(jmethod);
         as.assertTrue(opllvmFunc.isPresent(), "The decl of jmethod {} should have be translated", jmethod);
         LLVMValueRef llvmFunc = opllvmFunc.get();
@@ -545,7 +562,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
 
         }
-
 
         // We allocate an exit block for the exit stmt in CFG, which is added by Tai-e.
         Stmt exitStmt = cfg.getExit();
@@ -1237,10 +1253,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 return res;
             } else if (jexp instanceof InvokeInstanceExp) { // Abstract
                 Var baseVar = ((InvokeInstanceExp) jexp).getBase();
-                MethodRef methodRef = ((InvokeInstanceExp) jexp).getMethodRef();
-                JClass receiver = methodRef.getDeclaringClass();
-                Subsignature sig = methodRef.getSubsignature();
-                LLVMValueRef callee = resolveMethod(baseVar, sig, receiver);
+                LLVMValueRef callee = resolveMethod((InvokeInstanceExp) jexp);
 
                 /*
                  * T-InvokeInstance:
@@ -1434,10 +1447,14 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return codeGen.buildGEP(gepBase, gepIndexes);
     }
 
-    public LLVMValueRef resolveMethod(Var base, Subsignature sig, JClass receiver) {
+    public LLVMValueRef resolveMethod(InvokeInstanceExp exp) {
         /*
          * Virtual call resolution
          */
+        MethodRef methodRef = exp.getMethodRef();
+        Subsignature sig = methodRef.getSubsignature();
+        JClass receiver = methodRef.getDeclaringClass();
+        Var base = exp.getBase();
         Type baseType = base.getType();
         if (baseType instanceof ArrayType) {
             JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
@@ -1445,46 +1462,34 @@ public class JellyFish extends ProgramAnalysis<Void> {
         }
         as.assertTrue(baseType instanceof ClassType, "The base var should be ClassType. Got {}. On sig: {}. ", baseType, sig);
         JClass jclass = ((ClassType) baseType).getJClass();
-        JClass container = synRes.getLoadContainer(jclass, sig, classHierarchy);
-        if (container == null) { // direct call
-            if (!receiver.isInterface()) {
-                // if it's a class:
-                // then this direct call must be DEFINED within itself or its parents
-                JClass cur = receiver;
-                while (cur != null) {
-                    JMethod direct = cur.getDeclaredMethod(sig);
-                    if (direct != null) return getOrTranMethodDecl(direct);
-                    cur = cur.getSuperClass();
-                }
-            } else {
-                // if it's an interface
-                // it means that there is exactly one class that implements this method
-                Queue<JClass> worklist = new LinkedList<>();
-                worklist.add(receiver);
-                while (!worklist.isEmpty()) {
-                    JClass cur = worklist.poll();
-                    if (cur.isInterface()) {
-                        worklist.addAll(classHierarchy.getDirectSubinterfacesOf(cur));
-                        worklist.addAll(classHierarchy.getDirectImplementorsOf(cur));
-                    } else {
-                        JClass cur2 = cur;
-                        while (cur2 != null) {
-                            JMethod direct = cur2.getDeclaredMethod(sig);
-                            if (direct != null) return getOrTranMethodDecl(direct);
-                            cur2 = cur2.getSuperClass();
-                        }
-                    }
 
-                }
-            }
-
-            as.unreachable("Direct method not found for class: {}, receiver: {}, sig: {}", jclass, receiver, sig);
+        // FIXME: the semantics of jclass and receiver is still ambiguous. Fix it.
+        if (methodRef.getName().equals("<init>")) {
+            JMethod initMethod = receiver.getDeclaredMethod(sig);
+            as.assertTrue(initMethod != null, "The jclass {} should contain the <init>. Receiver: {}", jclass, receiver);
+            return getOrTranMethodDecl(initMethod);
         }
 
-        LLVMValueRef llvmVar = tranRValueCast(base, tranType(baseType, ClassStatus.DEP_FIELDS));
-        requireType(container.getType(), ClassStatus.DEP_FIELDS);
-        LLVMValueRef funcPtrPtr = buildGEPtoContainerSlot(jclass, container, llvmVar, maps.getSlotIndexMap(container, sig).get());
-        LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
-        return funcPtr;
+        JClass container = synRes.getLoadContainer(jclass, sig, classHierarchy);
+        if (container != null) {
+            LLVMValueRef llvmVar = tranRValueCast(base, tranType(baseType, ClassStatus.DEP_FIELDS));
+            requireType(container.getType(), ClassStatus.DEP_FIELDS);
+            Optional<Integer> lastSlotIndex = maps.getSlotIndexMap(container, sig);
+            as.assertTrue(lastSlotIndex.isPresent(), "Cannot find a slot index for container {}, sig {}", container, sig);
+            LLVMValueRef funcPtrPtr = buildGEPtoContainerSlot(jclass, container, llvmVar, lastSlotIndex.get());
+            LLVMValueRef funcPtr = codeGen.buildLoad(funcPtrPtr, "funcPtr");
+            return funcPtr;
+        }
+
+        JMethod theDirect = synRes.getDirectTarget(receiver, sig, classHierarchy);
+        if (theDirect == null) {
+            theDirect = synRes.getDirectTarget(jclass, sig, classHierarchy);
+        }
+        if (theDirect == null) {
+            theDirect = methodRef.resolveNullable();
+        }
+        as.assertTrue(theDirect != null, "The direct method should not be null. For jclass: {}, receiver: {}, sig: {}", jclass, receiver, sig);
+        return getOrTranMethodDecl(theDirect);
+
     }
 }
