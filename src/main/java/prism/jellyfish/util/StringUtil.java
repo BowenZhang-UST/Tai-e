@@ -3,6 +3,7 @@ package prism.jellyfish.util;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import pascal.taie.ir.exp.Var;
+import pascal.taie.ir.proginfo.MethodRef;
 import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
@@ -14,8 +15,8 @@ public class StringUtil {
     private static final Logger logger = LogManager.getLogger(StringUtil.class);
     private static final AssertUtil as = new AssertUtil(logger);
 
-    public static String getMethodName(JClass jclass, JMethod jmethod) {
-        return String.format("%s.%s", jclass.getName(), jmethod.getName());
+    public static String getMethodName(JMethod jmethod) {
+        return String.format("%s.%s", jmethod.getDeclaringClass().getName(), jmethod.getName());
     }
 
     public static String getClassName(JClass jclass) {
@@ -27,6 +28,10 @@ public class StringUtil {
         String className = StringUtil.getClassName(jclass);
 
         return String.format("%s.%s", className, jfield.getName());
+    }
+
+    public static String getPhantomMethodName(MethodRef ref) {
+        return String.format("phantom.%s.%s", ref.getDeclaringClass().getName(), ref.getName());
     }
 
     private static String getRealVarName(Var var) {

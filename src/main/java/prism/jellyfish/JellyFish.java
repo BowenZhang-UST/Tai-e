@@ -50,7 +50,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     private static final Logger logger = LogManager.getLogger(JellyFish.class);
     private static final AssertUtil as = new AssertUtil(logger);
 
-    private static final Level DEBUG_LEVEL = Level.DEBUG;
+    private static final Level DEBUG_LEVEL = Level.INFO;
 
     World world;
     ClassHierarchy classHierarchy;
@@ -361,7 +361,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         List<JMethod> methods = JavaUtil.getCallableMethodTypes(jclass);
         for (JMethod method : methods) {
             if (synRes.shouldContainSlot(jclass, method)) {
-                LLVMTypeRef funcType = tranMethodType(method);
+                LLVMTypeRef funcType = tranMethodType(method.getRef());
                 LLVMTypeRef funcPtrType = codeGen.buildPointerType(funcType);
                 boolean ret = maps.setSlotIndexMap(jclass, method.getSubsignature(), fieldTypes.size());
                 as.assertTrue(ret, "The slot {} of class {} has been duplicate translated", method.getSubsignature(), jclass);
@@ -405,19 +405,19 @@ public class JellyFish extends ProgramAnalysis<Void> {
         }
     }
 
-    private LLVMTypeRef tranMethodType(JMethod jmethod) {
-        JClass jclass = jmethod.getDeclaringClass();
+    public LLVMTypeRef tranMethodType(MethodRef ref) {
+        JClass jclass = ref.getDeclaringClass();
         List<LLVMTypeRef> paramTypes = new ArrayList<>();
-        if (!jmethod.isStatic()) {
+        if (!ref.isStatic()) {
             ClassType classType = jclass.getType();
             LLVMTypeRef llvmClassType = tranType(classType, ClassStatus.DEP_DECL);
             paramTypes.add(llvmClassType);
         }
-        for (Type jType : jmethod.getParamTypes()) {
+        for (Type jType : ref.getParameterTypes()) {
             LLVMTypeRef type = tranType(jType, ClassStatus.DEP_DECL);
             paramTypes.add(type);
         }
-        Type jretType = jmethod.getReturnType();
+        Type jretType = ref.getReturnType();
         LLVMTypeRef retType = tranType(jretType, ClassStatus.DEP_DECL);
         LLVMTypeRef funcType = codeGen.buildFunctionType(retType, paramTypes);
         return funcType;
@@ -494,15 +494,19 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public LLVMValueRef tranMethodDecl(JMethod jmethod) {
-        JClass jclass = jmethod.getDeclaringClass();
-        String methodName = StringUtil.getMethodName(jclass, jmethod);
-        LLVMTypeRef funcType = tranMethodType(jmethod);
+        String methodName = StringUtil.getMethodName(jmethod);
+        LLVMTypeRef funcType = tranMethodType(jmethod.getRef());
 
         LLVMValueRef func = codeGen.addFunction(funcType, methodName);
         boolean ret = maps.setMethodMap(jmethod, func);
         as.assertTrue(ret, "The method {} has been duplicate translated.", jmethod);
 
         return func;
+    }
+
+    public LLVMValueRef tranPhantomMethodDecl(MethodRef ref) {
+        LLVMTypeRef funcType = tranMethodType(ref);
+        return codeGen.addFunction(funcType, StringUtil.getPhantomMethodName(ref));
     }
 
     public void tranMethodBody(JMethod jmethod) {
@@ -1228,15 +1232,23 @@ public class JellyFish extends ProgramAnalysis<Void> {
             }
         } else if (jexp instanceof InvokeExp) { // Abstract
             if (jexp instanceof InvokeStatic) {
-                MethodRef methodRef = ((InvokeStatic) jexp).getMethodRef();
-                JMethod jcallee = methodRef.resolveNullable();
-                as.assertTrue(jcallee != null, "Invokestatic must can be resolved.");
-                LLVMValueRef callee = getOrTranMethodDecl(jcallee);
-                as.assertTrue(LLVM.LLVMCountParams(callee) == ((InvokeStatic) jexp).getArgCount(),
+                InvokeStatic invoke = (InvokeStatic) jexp;
+                MethodRef methodRef = invoke.getMethodRef();
+                LLVMValueRef callee;
+                if (methodRef.getDeclaringClass().isPhantom()) {
+                    logger.debug("phantom call: {}.", invoke);
+                    logger.debug("methodRef: {}. jclass: {}", methodRef, methodRef.getDeclaringClass());
+                    callee = tranPhantomMethodDecl(methodRef);
+                } else {
+                    JMethod jcallee = methodRef.resolveNullable();
+                    as.assertTrue(jcallee != null, "Invokestatic must can be resolved.");
+                    callee = getOrTranMethodDecl(jcallee);
+                }
+                as.assertTrue(LLVM.LLVMCountParams(callee) == invoke.getArgCount(),
                         "Argument number doesn't match. LLVM func: {}, static invoke: {}", getLLVMStr(callee), jexp);
                 List<LLVMValueRef> args = new ArrayList<>();
 
-                List<Var> jargs = ((InvokeStatic) jexp).getArgs();
+                List<Var> jargs = invoke.getArgs();
                 for (int i = 0; i < jargs.size(); i++) {
                     LLVMValueRef llvmIthParam = LLVM.LLVMGetParam(callee, i);
                     Var jarg = jargs.get(i);
@@ -1252,9 +1264,19 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMValueRef res = codeGen.buildNull(resType);
                 return res;
             } else if (jexp instanceof InvokeInstanceExp) { // Abstract
-                Var baseVar = ((InvokeInstanceExp) jexp).getBase();
-                LLVMValueRef callee = resolveMethod((InvokeInstanceExp) jexp);
+                InvokeInstanceExp invoke = (InvokeInstanceExp) jexp;
+                Var baseVar = invoke.getBase();
+                JClass jclass = JavaUtil.getJClassOfBaseVar(baseVar, classHierarchy);
+                MethodRef methodRef = invoke.getMethodRef();
 
+                LLVMValueRef callee;
+                if (jclass.isPhantom() || methodRef.getDeclaringClass().isPhantom()) {
+                    logger.debug("phantom call: {}. {}. {}", invoke, jclass.isPhantom(), methodRef.getDeclaringClass().isPhantom());
+                    logger.debug("methodRef: {}. jclass: {}", methodRef, jclass);
+                    callee = tranPhantomMethodDecl(methodRef);
+                } else {
+                    callee = resolveMethod(invoke);
+                }
                 /*
                  * T-InvokeInstance:
                  *     F(B1, B2...)
@@ -1262,17 +1284,17 @@ public class JellyFish extends ProgramAnalysis<Void> {
                  * ---------------------------
                  *     T3 = T1   T4 = T2 ...
                  */
-                LLVMTypeRef funcType = getFuncType(callee);
-                as.assertTrue(LLVM.LLVMCountParamTypes(funcType) == ((InvokeInstanceExp) jexp).getArgCount() + 1,
+                LLVMTypeRef funcType = LLVMUtil.getFuncType(callee);
+                as.assertTrue(LLVM.LLVMCountParamTypes(funcType) == invoke.getArgCount() + 1,
                         "Argument number doesn't match. LLVM func: {} with {}, instance invoke: {} with {}",
                         getLLVMStr(callee), LLVM.LLVMCountParamTypes(funcType),
-                        jexp, ((InvokeInstanceExp) jexp).getArgCount() + 1);
+                        jexp, invoke.getArgCount() + 1);
                 List<LLVMTypeRef> paramTypes = getParamTypes(funcType);
                 LLVMTypeRef llvm0thParamTy = paramTypes.get(0);
                 LLVMValueRef llvmThis = tranRValueCast(baseVar, llvm0thParamTy);
                 List<LLVMValueRef> args = new ArrayList<>();
                 args.add(llvmThis);
-                List<Var> jargs = ((InvokeInstanceExp) jexp).getArgs();
+                List<Var> jargs = invoke.getArgs();
                 for (int i = 1; i < jargs.size() + 1; i++) {
                     LLVMTypeRef llvmIthParamTy = paramTypes.get(i);
                     Var jarg = jargs.get(i - 1);
@@ -1455,13 +1477,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
         Subsignature sig = methodRef.getSubsignature();
         JClass receiver = methodRef.getDeclaringClass();
         Var base = exp.getBase();
-        Type baseType = base.getType();
-        if (baseType instanceof ArrayType) {
-            JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
-            baseType = objClass.getType();
-        }
-        as.assertTrue(baseType instanceof ClassType, "The base var should be ClassType. Got {}. On sig: {}. ", baseType, sig);
-        JClass jclass = ((ClassType) baseType).getJClass();
+        JClass jclass = JavaUtil.getJClassOfBaseVar(base, classHierarchy);
+
 
         // FIXME: the semantics of jclass and receiver is still ambiguous. Fix it.
         if (methodRef.getName().equals("<init>")) {
@@ -1472,7 +1489,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
         JClass container = synRes.getLoadContainer(jclass, sig, classHierarchy);
         if (container != null) {
-            LLVMValueRef llvmVar = tranRValueCast(base, tranType(baseType, ClassStatus.DEP_FIELDS));
+            LLVMValueRef llvmVar = tranRValueCast(base, tranType(jclass.getType(), ClassStatus.DEP_FIELDS));
             requireType(container.getType(), ClassStatus.DEP_FIELDS);
             Optional<Integer> lastSlotIndex = maps.getSlotIndexMap(container, sig);
             as.assertTrue(lastSlotIndex.isPresent(), "Cannot find a slot index for container {}, sig {}", container, sig);

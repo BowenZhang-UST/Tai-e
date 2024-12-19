@@ -2,10 +2,14 @@ package prism.jellyfish.util;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import pascal.taie.ir.exp.Var;
 import pascal.taie.language.classes.ClassHierarchy;
 import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.classes.Subsignature;
+import pascal.taie.language.type.ArrayType;
+import pascal.taie.language.type.ClassType;
+import pascal.taie.language.type.Type;
 import pascal.taie.util.collection.Sets;
 
 import java.util.*;
@@ -59,6 +63,18 @@ public class JavaUtil {
         return ownedMethods;
     }
 
+    public static JClass getJClassOfBaseVar(Var var, ClassHierarchy ch) {
+        /*
+         * Resolve the JClass of the base var 「xxx」 used in 「xxx.yyy」
+         */
+        Type type = var.getType();
+        if (type instanceof ArrayType) {
+            JClass objClass = ch.getClass("java.lang.Object");
+            type = objClass.getType();
+        }
+        as.assertTrue(type instanceof ClassType, "The base var should be ClassType. Got {}. ", type);
+        return ((ClassType) type).getJClass();
+    }
 
     public static List<JClass> getTraceBetween(ClassHierarchy ch, JClass source, JClass target) {
         Queue<List<JClass>> worklist = new LinkedList<>();
