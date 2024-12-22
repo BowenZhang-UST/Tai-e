@@ -50,7 +50,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     private static final Logger logger = LogManager.getLogger(JellyFish.class);
     private static final AssertUtil as = new AssertUtil(logger);
 
-    private static final Level DEBUG_LEVEL = Level.INFO;
+    private static final Level DEBUG_LEVEL = Level.DEBUG;
 
     World world;
     ClassHierarchy classHierarchy;
@@ -92,9 +92,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
         logger.info("Jellyfish is a transpiler from Tai-e IR to LLVM IR.");
         logger.info("Phase 1: synthesize layout.");
         synthesizeLayout();
-        logger.info("Phase 2: translate the classes.");
+        logger.info("Phase 2: analyze phantom member fields.");
+        analyzePhantomMemberFields();
+        logger.info("Phase 3: translate the classes.");
         translateClasses();
-        logger.info("Phase 3: apply optimization and generate bitcode.");
+        logger.info("Phase 4: apply optimization and generate bitcode.");
         generateLLVMBitcode();
         return null;
     }
@@ -158,6 +160,48 @@ public class JellyFish extends ProgramAnalysis<Void> {
         as.assertTrue(_persistClassInfo(), "Failed to persist class info");
         as.assertTrue(_triggerSynthesizer(), "Failed to perform synthesis");
         as.assertTrue(_loadSynthesisResult(), "Failed to load synthesis result");
+    }
+
+    public void analyzePhantomMemberFields() {
+        for (JClass jclass : classHierarchy.allClasses().toList()) {
+            maps.setClassPhantomMemberFieldsMap(jclass, new HashSet<>());
+        }
+
+        for (JClass jclass : classHierarchy.allClasses().toList()) {
+            for (JMethod jmethod : jclass.getDeclaredMethods()) {
+                IR ir;
+                try {
+                    ir = jmethod.getIR();
+                } catch (AnalysisException e) {
+                    continue;
+                }
+                for (Stmt stmt : ir.getStmts()) {
+                    List<Exp> exps = new ArrayList<>();
+                    Optional<LValue> lval = stmt.getDef();
+                    if (lval.isPresent()) {
+                        exps.add(lval.get());
+                    }
+                    exps.addAll(stmt.getUses());
+                    for (Exp exp : exps) {
+                        if (exp instanceof InstanceFieldAccess) {
+                            InstanceFieldAccess access = (InstanceFieldAccess) exp;
+                            FieldRef ref = access.getFieldRef();
+                            if (ref.isStatic()) continue;
+
+                            JField field = ref.resolveNullable();
+                            if (field != null) {
+                                JClass declClass = field.getDeclaringClass();
+                                if (!declClass.getDeclaredFields().contains(field)) {
+                                    maps.getClassPhantomMemberFieldsMap(declClass).get().add(field.getRef());
+                                }
+                            } else {
+                                maps.getClassPhantomMemberFieldsMap(ref.getDeclaringClass()).get().add(ref);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public void translateClasses() {
@@ -271,11 +315,21 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return opfieldPtr.get();
     }
 
+
     public Integer getOrTranMemberField(JField jfield) {
-        requireType(jfield.getDeclaringClass().getType(), ClassStatus.DEP_FIELDS);
+        JClass jclass = jfield.getDeclaringClass();
+        requireType(jclass.getType(), ClassStatus.DEP_FIELDS);
         Optional<Integer> opfieldIndex = maps.getMemberFieldMap(jfield);
-        as.assertTrue(opfieldIndex.isPresent(), "The field {} should have been translated.", jfield);
+        as.assertTrue(opfieldIndex.isPresent(), "A normal member field {} should be resolve.", jfield);
         return opfieldIndex.get();
+    }
+
+    public Integer getOrTranPhantomMemberField(FieldRef ref) {
+        JClass jclass = ref.getDeclaringClass();
+        requireType(jclass.getType(), ClassStatus.DEP_FIELDS);
+        Optional<Integer> index = maps.getPhantomMemberFieldMap(ref);
+        as.assertTrue(index.isPresent(), "Phantom field not resolved for {}", ref);
+        return index.get();
     }
 
     public LLVMValueRef getOrTranStringLiteral(String str) {
@@ -376,19 +430,28 @@ public class JellyFish extends ProgramAnalysis<Void> {
             Type ftype = field.getType();
             LLVMTypeRef fllvmType = tranType(ftype, ClassStatus.DEP_DECL);
             if (field.isStatic()) {
-                String staticFieldName = StringUtil.getStaticFieldName(jclass, field);
+                if (maps.getStaticFieldMap(field).isPresent())
+                    continue; // static fields may be shared.
+                String staticFieldName = StringUtil.getStaticFieldName(field.getRef(), false);
                 LLVMValueRef fieldVar = codeGen.addGlobalVariable(fllvmType, staticFieldName);
-                boolean ret = maps.setStaticFieldMap(field, fieldVar);
-                as.assertTrue(ret, "The jfield {} has been duplicate translated.", field);
-                continue;
+                maps.setStaticFieldMap(field, fieldVar);
             } else {
                 boolean ret = maps.setMemberFieldMap(field, fieldTypes.size());
                 as.assertTrue(ret, "The jfield {} has been duplicate translated", field);
                 fieldTypes.add(fllvmType);
             }
         }
+
+        // 5. Phantom Member Fields
+        Set<FieldRef> phantomFields = maps.getClassPhantomMemberFieldsMap(jclass).get();
+        for (FieldRef ref : phantomFields) {
+            Type ftype = ref.getType();
+            LLVMTypeRef fllvmType = tranType(ftype, ClassStatus.DEP_DECL);
+            maps.setPhantomMemberFieldMap(ref, fieldTypes.size());
+            fieldTypes.add(fllvmType);
+        }
+
         codeGen.setStructFields(llvmClass, fieldTypes);
-        return;
     }
 
     public LLVMTypeRef tranTypeAlloc(Type jType, ClassStatus dep) {
@@ -425,7 +488,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     public void requireType(Type jType, ClassStatus dep) {
         tranType(jType, dep);
-        return;
     }
 
     public LLVMTypeRef tranType(Type jType, ClassStatus dep) {
@@ -494,7 +556,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public LLVMValueRef tranMethodDecl(JMethod jmethod) {
-        String methodName = StringUtil.getMethodName(jmethod);
+        String methodName = StringUtil.getMethodName(jmethod.getRef(), false);
         LLVMTypeRef funcType = tranMethodType(jmethod.getRef());
 
         LLVMValueRef func = codeGen.addFunction(funcType, methodName);
@@ -506,11 +568,16 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     public LLVMValueRef tranPhantomMethodDecl(MethodRef ref) {
         LLVMTypeRef funcType = tranMethodType(ref);
-        return codeGen.addFunction(funcType, StringUtil.getPhantomMethodName(ref));
+        return codeGen.addFunction(funcType, StringUtil.getMethodName(ref, true));
+    }
+
+    public LLVMValueRef tranPhantomStaticField(FieldRef ref) {
+        String name = StringUtil.getStaticFieldName(ref, true);
+        LLVMTypeRef type = tranType(ref.getType(), ClassStatus.DEP_DECL);
+        return codeGen.addGlobalVariable(type, name);
     }
 
     public void tranMethodBody(JMethod jmethod) {
-//        logger.debug("Handling method {}. Class: {}", jmethod, jmethod.getDeclaringClass());
         Optional<LLVMValueRef> opllvmFunc = maps.getMethodMap(jmethod);
         as.assertTrue(opllvmFunc.isPresent(), "The decl of jmethod {} should have be translated", jmethod);
         LLVMValueRef llvmFunc = opllvmFunc.get();
@@ -999,23 +1066,33 @@ public class JellyFish extends ProgramAnalysis<Void> {
         } else if (jexp instanceof FieldAccess) { // Abstract
             if (jexp instanceof StaticFieldAccess) {
                 FieldRef fieldRef = ((StaticFieldAccess) jexp).getFieldRef();
+
                 JField jfield = fieldRef.resolveNullable();
-                as.assertTrue(jfield != null, "The static field access must can be handled");
+                if (jfield == null) {
+                    LLVMValueRef ptr = tranPhantomStaticField(fieldRef);
+                    as.assertTrue(ptr != null, "got null field for {}", fieldRef);
+                    LLVMValueRef load = codeGen.buildLoad(ptr, fieldRef.getName());
+                    return load;
+                } else {
+                    JClass declaringClass = jfield.getDeclaringClass();
+                    requireType(declaringClass.getType(), ClassStatus.DEP_FIELDS);
+                    if (declaringClass.getDeclaredFields().contains(jfield)) {
+                        LLVMValueRef ptr = getOrTranStaticField(jfield);
+                        LLVMValueRef load = codeGen.buildLoad(ptr, jfield.getName());
+                        return load;
+                    } else {
+                        LLVMValueRef ptr = tranPhantomStaticField(jfield.getRef());
+                        LLVMValueRef load = codeGen.buildLoad(ptr, fieldRef.getName());
+                        return load;
+                    }
 
-                JClass declaringClass = jfield.getDeclaringClass();
-                requireType(declaringClass.getType(), ClassStatus.DEP_FIELDS);
-
-                LLVMValueRef ptr = getOrTranStaticField(jfield);
-                LLVMValueRef load = codeGen.buildLoad(ptr, jfield.getName());
-                return load;
+                }
             } else if (jexp instanceof InstanceFieldAccess) {
                 Var baseVar = ((InstanceFieldAccess) jexp).getBase();
                 FieldRef fieldRef = ((InstanceFieldAccess) jexp).getFieldRef();
-                JField jfield = fieldRef.resolveNullable();
-                as.assertTrue(jfield != null, "Unexpected unsolvable field {}.", jexp);
-                LLVMValueRef ptr = resolveMemberField(jfield, baseVar);
+                LLVMValueRef ptr = resolveMemberField(fieldRef, baseVar);
 
-                LLVMValueRef load = codeGen.buildLoad(ptr, jfield.getName());
+                LLVMValueRef load = codeGen.buildLoad(ptr, fieldRef.getName());
                 return load;
             }
         } else if (jexp instanceof UnaryExp) { // Interface
@@ -1235,14 +1312,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 InvokeStatic invoke = (InvokeStatic) jexp;
                 MethodRef methodRef = invoke.getMethodRef();
                 LLVMValueRef callee;
-                if (methodRef.getDeclaringClass().isPhantom()) {
-                    logger.debug("phantom call: {}.", invoke);
-                    logger.debug("methodRef: {}. jclass: {}", methodRef, methodRef.getDeclaringClass());
-                    callee = tranPhantomMethodDecl(methodRef);
-                } else {
-                    JMethod jcallee = methodRef.resolveNullable();
-                    as.assertTrue(jcallee != null, "Invokestatic must can be resolved.");
+                JMethod jcallee = methodRef.resolveNullable();
+                if (jcallee != null) {
                     callee = getOrTranMethodDecl(jcallee);
+                } else {
+                    callee = tranPhantomMethodDecl(methodRef);
                 }
                 as.assertTrue(LLVM.LLVMCountParams(callee) == invoke.getArgCount(),
                         "Argument number doesn't match. LLVM func: {}, static invoke: {}", getLLVMStr(callee), jexp);
@@ -1269,13 +1343,9 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 JClass jclass = JavaUtil.getJClassOfBaseVar(baseVar, classHierarchy);
                 MethodRef methodRef = invoke.getMethodRef();
 
-                LLVMValueRef callee;
-                if (jclass.isPhantom() || methodRef.getDeclaringClass().isPhantom()) {
-                    logger.debug("phantom call: {}. {}. {}", invoke, jclass.isPhantom(), methodRef.getDeclaringClass().isPhantom());
-                    logger.debug("methodRef: {}. jclass: {}", methodRef, jclass);
+                LLVMValueRef callee = resolveMethod(invoke);
+                if (callee == null) {
                     callee = tranPhantomMethodDecl(methodRef);
-                } else {
-                    callee = resolveMethod(invoke);
                 }
                 /*
                  * T-InvokeInstance:
@@ -1371,16 +1441,23 @@ public class JellyFish extends ProgramAnalysis<Void> {
             if (jexp instanceof StaticFieldAccess) {
                 FieldRef fieldRef = ((StaticFieldAccess) jexp).getFieldRef();
                 JField jfield = fieldRef.resolveNullable();
-                if (jfield != null) {
-                    LLVMValueRef ptr = getOrTranStaticField(jfield);
+                if (jfield == null) {
+                    LLVMValueRef ptr = tranPhantomStaticField(fieldRef);
+                    as.assertTrue(ptr != null, "got null field for {}", fieldRef);
                     return ptr;
+                } else {
+                    if (jfield.getDeclaringClass().getDeclaredFields().contains(jfield)) {
+                        LLVMValueRef ptr = getOrTranStaticField(jfield);
+                        return ptr;
+                    } else {
+                        LLVMValueRef ptr = tranPhantomStaticField(jfield.getRef());
+                        return ptr;
+                    }
                 }
             } else if (jexp instanceof InstanceFieldAccess) {
                 Var baseVar = ((InstanceFieldAccess) jexp).getBase();
                 FieldRef fieldRef = ((InstanceFieldAccess) jexp).getFieldRef();
-                JField jfield = fieldRef.resolveNullable();
-                as.assertTrue(jfield != null, "Unexpected unsolvable field {}.", jexp);
-                LLVMValueRef ptr = resolveMemberField(jfield, baseVar);
+                LLVMValueRef ptr = resolveMemberField(fieldRef, baseVar);
                 return ptr;
             }
         } else if (jexp instanceof Var) {
@@ -1424,18 +1501,32 @@ public class JellyFish extends ProgramAnalysis<Void> {
     /*
      * Resolution of OOP features
      */
-    public LLVMValueRef resolveMemberField(JField jfield, Var baseVar) {
+    public LLVMValueRef resolveMemberField(FieldRef fieldRef, Var baseVar) {
         Type baseType = baseVar.getType();
         as.assertTrue(baseType instanceof ClassType, "The base var {} should be of classType", baseVar);
-
         JClass baseClass = ((ClassType) baseType).getJClass();
-        JClass tarClass = jfield.getDeclaringClass();
-        as.assertTrue(classHierarchy.isSubclass(tarClass, baseClass), "target class should be super of base. Target: {}. Base: {}", tarClass, baseClass);
+        JClass tarClass;
 
+        JField jfield = fieldRef.resolveNullable();
+        Integer index;
+        if (jfield != null) {
+            tarClass = jfield.getDeclaringClass();
+            if (tarClass.getDeclaredFields().contains(jfield)) {
+                // 1. a normal field
+                index = getOrTranMemberField(jfield);
+            } else {
+                // 2. generated phantom class
+                index = getOrTranPhantomMemberField(jfield.getRef());
+            }
+        } else {
+            // 3. an unsolved field
+            tarClass = fieldRef.getDeclaringClass();
+            index = getOrTranPhantomMemberField(fieldRef);
+        }
+
+        as.assertTrue(classHierarchy.isSubclass(tarClass, baseClass), "target class should be super of base. Target: {}. Base: {}", tarClass, baseClass);
         LLVMTypeRef llvmTarClass = tranType(tarClass.getType(), ClassStatus.DEP_FIELDS);
         LLVMValueRef base = tranRValueCast(baseVar, llvmTarClass);
-
-        Integer index = getOrTranMemberField(jfield);
         LLVMValueRef ptr = codeGen.buildGEP(
                 base,
                 List.of(
@@ -1469,6 +1560,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return codeGen.buildGEP(gepBase, gepIndexes);
     }
 
+    @Nullable
     public LLVMValueRef resolveMethod(InvokeInstanceExp exp) {
         /*
          * Virtual call resolution
@@ -1479,11 +1571,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
         Var base = exp.getBase();
         JClass jclass = JavaUtil.getJClassOfBaseVar(base, classHierarchy);
 
-
         // FIXME: the semantics of jclass and receiver is still ambiguous. Fix it.
         if (methodRef.getName().equals("<init>")) {
             JMethod initMethod = receiver.getDeclaredMethod(sig);
-            as.assertTrue(initMethod != null, "The jclass {} should contain the <init>. Receiver: {}", jclass, receiver);
+//            as.assertTrue(initMethod != null, "The jclass {} should contain the <init>. Receiver: {}", jclass, receiver);
+            if (initMethod == null) return null;
             return getOrTranMethodDecl(initMethod);
         }
 
@@ -1505,7 +1597,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
         if (theDirect == null) {
             theDirect = methodRef.resolveNullable();
         }
-        as.assertTrue(theDirect != null, "The direct method should not be null. For jclass: {}, receiver: {}, sig: {}", jclass, receiver, sig);
+//        as.assertTrue(theDirect != null, "The direct method should not be null. For jclass: {}, receiver: {}, sig: {}", jclass, receiver, sig);
+        if (theDirect == null) return null;
         return getOrTranMethodDecl(theDirect);
 
     }

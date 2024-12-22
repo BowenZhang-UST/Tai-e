@@ -7,6 +7,7 @@ import org.bytedeco.llvm.LLVM.LLVMBasicBlockRef;
 import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
 import pascal.taie.ir.exp.Var;
+import pascal.taie.ir.proginfo.FieldRef;
 import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JField;
@@ -18,6 +19,7 @@ import prism.jellyfish.util.AssertUtil;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public class Mappings {
     private static final Logger logger = LogManager.getLogger(Mappings.class);
@@ -25,30 +27,33 @@ public class Mappings {
 
     public HashMap<JClass, LLVMTypeRef> classMap;
     public HashMap<JClass, ClassStatus> classStatusMap;
+    public HashMap<JClass, Set<FieldRef>> classPhantomMemberFieldsMap;
+    public HashMap<JClass, List<LLVMTypeRef>> classSlotsMap;
     public HashMap<JMethod, LLVMValueRef> methodMap;
     public HashMap<Var, LLVMValueRef> varMap;
     public HashMap<JField, LLVMValueRef> staticFieldMap;
     public HashMap<JField, Integer> memberFieldMap;
+    public HashMap<FieldRef, Integer> phantomMemberFieldMap;
     public HashMap<String, Integer> slotIndexMap;
     public HashMap<String, Integer> interfaceIndexMap;
     public HashMap<String, LLVMValueRef> stringPoolMap;
     public HashMap<Stmt, LLVMBasicBlockRef> stmtBlockMap;
-    public HashMap<JClass, List<Subsignature>> classSigMap;
-    public HashMap<JClass, List<JMethod>> classMethodMap;
 
     public Mappings() {
         this.classMap = new HashMap<>();
         this.classStatusMap = new HashMap<>();
+        this.classPhantomMemberFieldsMap = new HashMap<>();
+        this.classSlotsMap = new HashMap<>();
         this.methodMap = new HashMap<>();
         this.varMap = new HashMap<>();
         this.staticFieldMap = new HashMap<>();
         this.memberFieldMap = new HashMap<>();
+        this.phantomMemberFieldMap = new HashMap<>();
         this.interfaceIndexMap = new HashMap<>();
         this.slotIndexMap = new HashMap<>();
         this.stringPoolMap = new HashMap<>();
         this.stmtBlockMap = new HashMap<>();
-        this.classSigMap = new HashMap<>();
-        this.classMethodMap = new HashMap<>();
+
 
     }
 
@@ -104,6 +109,17 @@ public class Mappings {
 
     public Optional<ClassStatus> getClassStatusMap(JClass jclass) {
         return getFromMap(classStatusMap, jclass);
+    }
+
+    /*
+     * Class phantom-member-fields map
+     */
+    public boolean setClassPhantomMemberFieldsMap(JClass jclass, Set<FieldRef> refs) {
+        return setMap(classPhantomMemberFieldsMap, jclass, refs);
+    }
+
+    public Optional<Set<FieldRef>> getClassPhantomMemberFieldsMap(JClass jclass) {
+        return getFromMap(classPhantomMemberFieldsMap, jclass);
     }
 
 
@@ -167,6 +183,18 @@ public class Mappings {
     }
 
     /*
+     * Phantom member field map.
+     */
+    public boolean setPhantomMemberFieldMap(FieldRef ref, Integer index) {
+        as.assertTrue(!ref.isStatic(), "The field {} should be member field", ref);
+        return setMap(phantomMemberFieldMap, ref, index);
+    }
+
+    public Optional<Integer> getPhantomMemberFieldMap(FieldRef ref) {
+        return getFromMap(phantomMemberFieldMap, ref);
+    }
+
+    /*
      * Slot index map. <className::sig> -> index of function pointer
      */
     public boolean setSlotIndexMap(JClass jclass, Subsignature sig, Integer index) {
@@ -216,26 +244,5 @@ public class Mappings {
         clearMap(stmtBlockMap);
     }
 
-    /*
-     * Class-method signatures map.
-     */
-    public boolean setClassSigMap(JClass jclass, List<Subsignature> sigs) {
-        return setMap(classSigMap, jclass, sigs);
-    }
-
-    public Optional<List<Subsignature>> getClassSigMap(JClass jclass) {
-        return getFromMap(classSigMap, jclass);
-    }
-
-    /*
-     * Class-owned methods map.
-     */
-    public boolean setClassMethodMap(JClass jclass, List<JMethod> methods) {
-        return setMap(classMethodMap, jclass, methods);
-    }
-
-    public Optional<List<JMethod>> getClassMethodMap(JClass jclass) {
-        return getFromMap(classMethodMap, jclass);
-    }
 
 }
