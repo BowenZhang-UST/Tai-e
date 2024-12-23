@@ -50,7 +50,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     private static final Logger logger = LogManager.getLogger(JellyFish.class);
     private static final AssertUtil as = new AssertUtil(logger);
 
-    private static final Level DEBUG_LEVEL = Level.DEBUG;
+    private static final Level DEBUG_LEVEL = Level.INFO;
 
     World world;
     ClassHierarchy classHierarchy;
@@ -101,6 +101,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return null;
     }
 
+    public void synthesizeLayout() {
+        as.assertTrue(_persistClassInfo(), "Failed to persist class info");
+        as.assertTrue(_triggerSynthesizer(), "Failed to perform synthesis");
+        as.assertTrue(_loadSynthesisResult(), "Failed to load synthesis result");
+    }
+
     private boolean _persistClassInfo() {
         List<JClass> jclasses = classHierarchy.allClasses().toList();
         List<JellyClass> jellyClasses = new ArrayList<>();
@@ -127,7 +133,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
     private boolean _triggerSynthesizer() {
         try {
-            ProcessBuilder processBuilder = new ProcessBuilder("python3", "chironex/python/main.py", "-i", "output/oo.json", "-o", "output/oo.o.json", "-g", "slot");
+            ProcessBuilder processBuilder = new ProcessBuilder("python3", "chironex/python/main.py", "-i", "output/oo.json", "-o", "output/oo.o.json", "-g", "slot", "--parallel");
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
@@ -154,12 +160,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
             return false;
         }
         return true;
-    }
-
-    public void synthesizeLayout() {
-        as.assertTrue(_persistClassInfo(), "Failed to persist class info");
-        as.assertTrue(_triggerSynthesizer(), "Failed to perform synthesis");
-        as.assertTrue(_loadSynthesisResult(), "Failed to load synthesis result");
     }
 
     public void analyzePhantomMemberFields() {

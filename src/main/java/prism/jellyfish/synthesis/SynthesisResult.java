@@ -32,7 +32,7 @@ public class SynthesisResult {
         String className = jclass.getName();
         String sig = subSig.toString();
 
-        as.assertTrue(directPaths.containsKey(className), "Should contain the class {} for sig", className, sig);
+        as.assertTrue(directPaths.containsKey(className), "Should contain the class {} for sig {}", className, sig);
         Map<String, String> sig2FullSig = directPaths.get(className);
         if (!sig2FullSig.containsKey(sig)) { // indirect call
             return null;
