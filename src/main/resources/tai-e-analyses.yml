@@ -161,7 +161,23 @@
   analysisClass: pascal.taie.analysis.bugfinder.DroppedException
   id: dropped-exception
 
-- description: Jellyfish transpiler
+- description: Jellyfish Transpiler
   analysisClass: prism.jellyfish.JellyFish
   id: jelly-fish
   requires: [ cfg ]
+  options:
+    group-to-translate: 0 # a file including a group of classes to translate
+
+- description: Jellyfish Scheduler
+  analysisClass: prism.jellyfish.Scheduler
+  id: jelly-scheduler
+  requires: [ jelly-synthesizer ]
+  options:
+    threads: 1
+
+- description: Jellyfish Synthesizer
+  analysisClass: prism.jellyfish.Synthesizer
+  id: jelly-synthesizer
+  requires: [ ]
+
+

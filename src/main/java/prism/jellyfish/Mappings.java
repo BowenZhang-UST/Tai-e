@@ -28,7 +28,6 @@ public class Mappings {
     public HashMap<JClass, LLVMTypeRef> classMap;
     public HashMap<JClass, ClassStatus> classStatusMap;
     public HashMap<JClass, Set<FieldRef>> classPhantomMemberFieldsMap;
-    public HashMap<JClass, List<LLVMTypeRef>> classSlotsMap;
     public HashMap<JMethod, LLVMValueRef> methodMap;
     public HashMap<Var, LLVMValueRef> varMap;
     public HashMap<JField, LLVMValueRef> staticFieldMap;
@@ -43,7 +42,6 @@ public class Mappings {
         this.classMap = new HashMap<>();
         this.classStatusMap = new HashMap<>();
         this.classPhantomMemberFieldsMap = new HashMap<>();
-        this.classSlotsMap = new HashMap<>();
         this.methodMap = new HashMap<>();
         this.varMap = new HashMap<>();
         this.staticFieldMap = new HashMap<>();
@@ -113,6 +111,9 @@ public class Mappings {
 
     /*
      * Class phantom-member-fields map
+     * records all the phantom fields of a class
+     * Collected during the pre-analysis `analyzePhantomMemberFields()`
+     * Used during `tranClassFields()`
      */
     public boolean setClassPhantomMemberFieldsMap(JClass jclass, Set<FieldRef> refs) {
         return setMap(classPhantomMemberFieldsMap, jclass, refs);

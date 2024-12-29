@@ -27,8 +27,6 @@ import pascal.taie.language.classes.*;
 import pascal.taie.language.type.*;
 import pascal.taie.util.AnalysisException;
 import pascal.taie.util.collection.Pair;
-import prism.jellyfish.synthesis.JellyClass;
-import prism.jellyfish.synthesis.JellyMethod;
 import prism.jellyfish.synthesis.SynthesisResult;
 import prism.jellyfish.util.AssertUtil;
 import prism.jellyfish.util.JavaUtil;
@@ -37,7 +35,9 @@ import prism.llvm.LLVMCodeGen;
 import prism.llvm.LLVMUtil;
 
 import javax.annotation.Nullable;
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
@@ -56,28 +56,45 @@ public class JellyFish extends ProgramAnalysis<Void> {
     ClassHierarchy classHierarchy;
     LLVMCodeGen codeGen;
     Mappings maps;
-    AnalysisConfig config;
     SynthesisResult synRes;
-
+    List<JClass> classesToTranslate;
 
     public JellyFish(AnalysisConfig config) {
         super(config);
-        this.config = config;
         this.world = World.get();
         this.classHierarchy = world.getClassHierarchy();
         this.maps = new Mappings();
-        // Set LLVMCodegen
+        this.classesToTranslate = new ArrayList<>();
         Options options = this.world.getOptions();
+
+        // Loading classes to translate
+        Integer group = getOptions().getInt("group-to-translate");
+        if (group == 0) {
+            this.classesToTranslate = classHierarchy.applicationClasses().toList();
+        } else {
+            try (BufferedReader br = new BufferedReader(new FileReader(options.getOutputDir() + "/groups/" + group))) {
+                String oneClass;
+                while ((oneClass = br.readLine()) != null) {
+                    JClass jclass = classHierarchy.getClass(oneClass);
+                    if (jclass != null) classesToTranslate.add(jclass);
+                }
+            } catch (IOException e) {
+                logger.info("Error when reading group {}", group);
+                e.printStackTrace();
+            }
+        }
+
+        // Set LLVMCodegen
         if (options.getAppClassPath().size() > 0) {
             String path2Jar = options.getAppClassPath().get(0);
             Path path = Paths.get(path2Jar);
             String jarFileName = path.getFileName().toString();
-            String outputPrefix = options.getOutputDir() + "/" + jarFileName.substring(0, jarFileName.length() - 4);
+            String outputPrefix = options.getOutputDir() + "/" + jarFileName.substring(0, jarFileName.length() - 4) + "." + group;
             this.codeGen = new LLVMCodeGen(path2Jar, outputPrefix);
         } else {
             String path2Cp = options.getClassPath().get(0);
             Path path = Paths.get(path2Cp);
-            String outputPrefix = options.getOutputDir() + "/" + path.getFileName().toString();
+            String outputPrefix = options.getOutputDir() + "/" + path.getFileName().toString() + "." + group;
             this.codeGen = new LLVMCodeGen(path2Cp, outputPrefix);
         }
         Configurator.setAllLevels(LogManager.getRootLogger().getName(), DEBUG_LEVEL);
@@ -90,7 +107,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     @Override
     public Void analyze() {
         logger.info("Jellyfish is a transpiler from Tai-e IR to LLVM IR.");
-        logger.info("Phase 1: synthesize layout.");
+        logger.info("Phase 1: obtain synthesis result");
         synthesizeLayout();
         logger.info("Phase 2: analyze phantom member fields.");
         analyzePhantomMemberFields();
@@ -102,56 +119,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public void synthesizeLayout() {
-        as.assertTrue(_persistClassInfo(), "Failed to persist class info");
-        as.assertTrue(_triggerSynthesizer(), "Failed to perform synthesis");
-        as.assertTrue(_loadSynthesisResult(), "Failed to load synthesis result");
+        as.assertTrue(loadSynthesisResult(), "Failed to load synthesis result");
     }
 
-    private boolean _persistClassInfo() {
-        List<JClass> jclasses = classHierarchy.allClasses().toList();
-        List<JellyClass> jellyClasses = new ArrayList<>();
-        for (JClass jclass : jclasses) {
-            List<String> callableSigs = JavaUtil.getCallableSignatures(jclass);
-            List<JMethod> ownedMethods = JavaUtil.getOwnedMethods(classHierarchy, jclass);
-            String kindName = jclass.isInterface() ? "interface" : "class";
-            String className = jclass.getName();
-            String superName = jclass.getSuperClass() == null ? "" : jclass.getSuperClass().getName();
-            List<String> interfaces = jclass.getInterfaces().stream().map(JClass::getName).toList();
-            List<JellyMethod> jellyMethods = ownedMethods.stream().map(m -> new JellyMethod(m.getSubsignature().toString(), m.getDeclaringClass().getName(), m.getSignature())).toList();
-            JellyClass jellyClass = new JellyClass(kindName, className, superName, callableSigs, interfaces, jellyMethods);
-            jellyClasses.add(jellyClass);
-        }
-        try (FileWriter writer = new FileWriter("output/oo.json")) {
-            Gson gson = new GsonBuilder().setPrettyPrinting().create();
-            gson.toJson(jellyClasses, writer);
-        } catch (IOException e) {
-            e.printStackTrace();
-            return false;
-        }
-        return true;
-    }
-
-    private boolean _triggerSynthesizer() {
-        try {
-            ProcessBuilder processBuilder = new ProcessBuilder("python3", "chironex/python/main.py", "-i", "output/oo.json", "-o", "output/oo.o.json", "-g", "slot", "--parallel");
-            processBuilder.redirectErrorStream(true);
-            Process process = processBuilder.start();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    logger.info(line);
-                }
-            }
-            int retCode = process.waitFor();
-            as.assertTrue(retCode == 0, "Error when triggering the synthesizer");
-        } catch (Exception e) {
-            e.printStackTrace();
-            return false;
-        }
-        return true;
-    }
-
-    private boolean _loadSynthesisResult() {
+    private boolean loadSynthesisResult() {
         try (FileReader reader = new FileReader("output/oo.o.json")) {
             Gson gson = new GsonBuilder().create();
             synRes = gson.fromJson(reader, SynthesisResult.class);
@@ -205,7 +176,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
     }
 
     public void translateClasses() {
-        List<JClass> jclasses = classHierarchy.applicationClasses().toList();
+        List<JClass> jclasses = this.classesToTranslate;
         for (JClass jclass : jclasses) {
             String className = jclass.getName();
             String moduleName = jclass.getModuleName();
