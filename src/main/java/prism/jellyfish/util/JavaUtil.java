@@ -105,5 +105,21 @@ public class JavaUtil {
 
     }
 
+    public static Stream<JClass> getAllInterfacesOf(JClass jclass) {
+        Set<JClass> faces = new HashSet<>();
+        Queue<JClass> worklist = new LinkedList<>();
+        worklist.add(jclass);
+        while (!worklist.isEmpty()) {
+            JClass cur = worklist.poll();
+            faces.addAll(cur.getInterfaces());
+
+            if (!cur.isInterface() && cur.getSuperClass() != null) {
+                worklist.add(cur.getSuperClass());
+            }
+            cur.getInterfaces().stream().forEach(i -> worklist.add(i));
+        }
+        return faces.stream();
+    }
+
 
 }

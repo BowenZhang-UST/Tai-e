@@ -70,7 +70,8 @@ public class LLVMCodeGen {
      */
 
     public LLVMValueRef addGlobalVariable(LLVMTypeRef type, String name) {
-        return LLVM.LLVMAddGlobal(module, type, name);
+        LLVMValueRef global = LLVM.LLVMAddGlobal(module, type, name);
+        return global;
     }
 
     public LLVMValueRef addFunction(LLVMTypeRef funcType, String funcName) {
@@ -660,7 +661,7 @@ public class LLVMCodeGen {
                 return ret;
             }
             case JELLYFISH_NEWARRAY: {
-                // i32* jellyfish.new(i32 baseSize, i32... lengths)
+                // i32* jellyfish.new.[dimensions](i32 baseSize, i32... lengths)
                 List<LLVMTypeRef> paramTypes = new ArrayList<>();
                 paramTypes.add(buildIntType(32));
                 Integer dimension = (Integer) params[0];

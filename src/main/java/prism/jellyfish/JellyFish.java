@@ -89,12 +89,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
             String path2Jar = options.getAppClassPath().get(0);
             Path path = Paths.get(path2Jar);
             String jarFileName = path.getFileName().toString();
-            String outputPrefix = options.getOutputDir() + "/" + jarFileName.substring(0, jarFileName.length() - 4) + "." + group;
+            String outputPrefix = options.getOutputDir() + "/bc/" + jarFileName.substring(0, jarFileName.length() - 4) + "." + group;
             this.codeGen = new LLVMCodeGen(path2Jar, outputPrefix);
         } else {
             String path2Cp = options.getClassPath().get(0);
             Path path = Paths.get(path2Cp);
-            String outputPrefix = options.getOutputDir() + "/" + path.getFileName().toString() + "." + group;
+            String outputPrefix = options.getOutputDir() + "/bc/" + path.getFileName().toString() + "." + group;
             this.codeGen = new LLVMCodeGen(path2Cp, outputPrefix);
         }
         Configurator.setAllLevels(LogManager.getRootLogger().getName(), DEBUG_LEVEL);
@@ -238,6 +238,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMTypeRef newClass = this.tranClassDecl(jclass);
             boolean ret = maps.setClassMap(jclass, newClass);
             as.assertTrue(ret, "The jclass {} has been duplicate translated.", jclass);
+            ret = maps.setReverseClassMap(newClass, jclass);
+            as.assertTrue(ret, "The jclass {} has been duplicated translated.", jclass);
             theClass = newClass;
 
             ret = maps.setClassStatusMap(jclass, ClassStatus.DEP_DECL);
@@ -353,7 +355,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         // A placeholder value to let the type stay in bitcode.
         String placeHolderValName = String.format("placeholder.%s", className);
         LLVMValueRef phValue = codeGen.addGlobalVariable(classType, placeHolderValName);
-        LLVM.LLVMSetLinkage(phValue, LLVM.LLVMExternalLinkage);
+        LLVM.LLVMSetLinkage(phValue, LLVM.LLVMExternalWeakLinkage);
         return classType;
     }
 
@@ -364,16 +366,21 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
         JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
         LLVMTypeRef llvmObjClass = tranType(objClass.getType(), ClassStatus.DEP_DECL);
-
         List<LLVMTypeRef> fieldTypes = new ArrayList<>();
         // 1. "super field"
         JClass sclass = jclass.getSuperClass();
-        if (sclass != null) {
+        if (jclass.isInterface()) {
+            // an interface
+            fieldTypes.add(llvmObjClass);
+        } else if (sclass != null) {
+            // a class except for java.lang.Object
             LLVMTypeRef llvmSuperClass = tranTypeAlloc(sclass.getType(), ClassStatus.DEP_DECL);
             fieldTypes.add(llvmSuperClass);
         } else {
-            fieldTypes.add(llvmObjClass);
+            // java.lang.Object doesn't have a super field
+            as.assertTrue(jclass == objClass, "It should be java.lang.Object");
         }
+
         // 2. "interface field"
         Collection<JClass> interfaces = jclass.getInterfaces();
         for (JClass i : interfaces) {
@@ -552,7 +559,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
         Optional<LLVMValueRef> opllvmFunc = maps.getMethodMap(jmethod);
         as.assertTrue(opllvmFunc.isPresent(), "The decl of jmethod {} should have be translated", jmethod);
         LLVMValueRef llvmFunc = opllvmFunc.get();
-
         IR ir;
         CFG<Stmt> cfg;
         try {
@@ -574,15 +580,24 @@ public class JellyFish extends ProgramAnalysis<Void> {
         // as well as the storing paths of virtual functions (if it's an init function)
         LLVMBasicBlockRef entryBlock = codeGen.addBasicBlock(llvmFunc, "entry");
         codeGen.setInsertBlock(entryBlock);
-        List<Var> vars = ir.getVars();
-        for (Var var : vars) {
+        List<Var> paramVars = ir.getParams();
+        for (Var var : ir.getVars()) {
             Type jvarType = var.getType();
             if (jvarType instanceof NullType) continue;
             LLVMTypeRef llvmVarType = tranType(jvarType, ClassStatus.DEP_FIELDS);
-            String llvmVarName = StringUtil.getVarNameAsPtr(var);
-            LLVMValueRef alloca = codeGen.buildAlloca(llvmVarType, llvmVarName);
-            boolean ret = maps.setVarMap(var, alloca);
-            as.assertTrue(ret, "The var {} has been duplicate translated.", var);
+            LLVMValueRef llvmVar;
+            if (paramVars.contains(var)) {
+                int index = paramVars.indexOf(var);
+                LLVMValueRef param = LLVM.LLVMGetParam(llvmFunc, index);
+                boolean ret = maps.setParamMap(var, param);
+                as.assertTrue(ret, "The var {} has been duplicate translated.", var);
+            } else {
+                String llvmVarName = StringUtil.getVarNameAsPtr(var);
+                LLVMValueRef alloca = codeGen.buildAlloca(llvmVarType, llvmVarName);
+                boolean ret = maps.setVarMap(var, alloca);
+                as.assertTrue(ret, "The var {} has been duplicate translated.", var);
+            }
+
         }
         if (jmethod.getName().equals("<init>")) {
             JClass jclass = jmethod.getDeclaringClass();
@@ -595,12 +610,18 @@ public class JellyFish extends ProgramAnalysis<Void> {
                     requireType(toStore.getType(), ClassStatus.DEP_FIELDS);
                     Optional<Integer> lastIndex = maps.getSlotIndexMap(toStore, sig);
                     as.assertTrue(lastIndex.isPresent(), "The container {} should have a slot for sig {}", toStore.getName(), sig);
-                    LLVMValueRef gep = buildGEPtoContainerSlot(jclass, toStore, thisPtr, lastIndex.get());
+                    LLVMValueRef gep2Slot = buildGEPtoContainerSlot(jclass, toStore, thisPtr, lastIndex.get());
                     requireType(owned.getDeclaringClass().getType(), ClassStatus.DEP_METHOD_DECL);
                     LLVMValueRef funcPtr = maps.getMethodMap(owned).get();
-                    LLVMTypeRef tarFuncPtrType = LLVM.LLVMGetElementType(getValueType(gep));
-                    codeGen.buildStore(gep, codeGen.buildTypeCast(funcPtr, tarFuncPtrType));
+                    LLVMTypeRef tarFuncPtrType = LLVM.LLVMGetElementType(getValueType(gep2Slot));
+                    codeGen.buildStore(gep2Slot, codeGen.buildTypeCast(funcPtr, tarFuncPtrType));
                 }
+            }
+            for (JClass face : JavaUtil.getAllInterfacesOf(jclass).toList()) {
+                LLVMValueRef gep2ThisField = buildGEPtoContainerSlot(jclass, face, thisPtr, 0);
+                JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
+                LLVMTypeRef llvmObjClass = tranType(objClass.getType(), ClassStatus.DEP_FIELDS);
+                codeGen.buildStore(gep2ThisField, codeGen.buildTypeCast(thisPtr, llvmObjClass));
             }
 
         }
@@ -727,6 +748,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
         }
 
+        maps.clearParamMap();
         maps.clearVarMap();
         maps.clearStmtBlockMap();
 
@@ -956,7 +978,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMValueRef translatedVal = tranRValueImpl(jexp, Optional.of(outType));  // pass in as default type
         as.assertTrue(translatedVal != null, "We can't obtain a null value when using a default out type.");
 
-        return codeGen.buildTypeCast(translatedVal, outType);
+        return buildCast(translatedVal, outType); // It should be aware of the OO-features
     }
 
     @Nullable
@@ -1351,11 +1373,19 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 LLVMValueRef typedNullVal = codeGen.buildNull(defaultType.get());
                 return typedNullVal;
             } else {
-                Optional<LLVMValueRef> opvarPtr = maps.getVarMap((Var) jexp);
-                as.assertTrue(opvarPtr.isPresent(), "The variable {} has not been correctly handled", (Var) jexp);
-                LLVMValueRef ptr = opvarPtr.get();
-                LLVMValueRef llvmVal = codeGen.buildLoad(ptr, StringUtil.getVarNameAsLoad((Var) jexp));
-                return llvmVal;
+                Optional<LLVMValueRef> opVarPtr = maps.getVarMap((Var) jexp);
+                Optional<LLVMValueRef> opParam = maps.getParamMap((Var) jexp);
+
+                as.assertTrue(opVarPtr.isPresent() || opParam.isPresent(), "The variable {} has not been correctly handled", (Var) jexp);
+                if (opVarPtr.isPresent()) {
+                    LLVMValueRef ptr = opVarPtr.get();
+                    LLVMValueRef llvmVal = codeGen.buildLoad(ptr, StringUtil.getVarNameAsLoad((Var) jexp));
+                    return llvmVal;
+                } else {
+                    LLVMValueRef param = opParam.get();
+                    return param;
+                }
+
             }
         } else if (jexp instanceof ArrayAccess) {
             /*
@@ -1436,9 +1466,16 @@ public class JellyFish extends ProgramAnalysis<Void> {
             as.assertFalse(jexp.getType() instanceof NullType, "It's not meaningful to have a null typed LValue: {}.", jexp);
 
             Optional<LLVMValueRef> opVarPtr = maps.getVarMap((Var) jexp);
-            as.assertTrue(opVarPtr.isPresent(), "The variable {} has not been correctly handled", (Var) jexp);
-            LLVMValueRef ptr = opVarPtr.get();
-            return ptr;
+            Optional<LLVMValueRef> opParam = maps.getParamMap((Var) jexp);
+
+            as.assertTrue(opVarPtr.isPresent() || opParam.isPresent(), "The variable {} has not been correctly handled", jexp);
+            if (opVarPtr.isPresent()) {
+                LLVMValueRef ptr = opVarPtr.get();
+                return ptr;
+            } else {
+                LLVMValueRef param = opParam.get();
+                return param;
+            }
         } else if (jexp instanceof ArrayAccess) {
             /*
              * T-L-ARRAY:
@@ -1508,11 +1545,70 @@ public class JellyFish extends ProgramAnalysis<Void> {
         return ptr;
     }
 
+    public LLVMValueRef buildCast(LLVMValueRef src, LLVMTypeRef tgtType) {
+        /*
+        Cast that is aware of both the  Java class hierarchy and the LLVM type system.
+         */
+        LLVMTypeRef srcType = getValueType(src);
+        int srcKind = LLVM.LLVMGetTypeKind(srcType);
+        int tgtKind = LLVM.LLVMGetTypeKind(tgtType);
+        if (srcKind == LLVM.LLVMPointerTypeKind && tgtKind == LLVM.LLVMPointerTypeKind) {
+            LLVMTypeRef srcElemType = LLVM.LLVMGetElementType(srcType);
+            LLVMTypeRef tgtElemType = LLVM.LLVMGetElementType(tgtType);
+            Optional<JClass> srcClass = maps.getReverseClassMap(srcElemType);
+            Optional<JClass> tgtClass = maps.getReverseClassMap(tgtElemType);
+            if (srcClass.isPresent() && tgtClass.isPresent()) {
+                JClass jsrc = srcClass.get();
+                JClass jtgt = tgtClass.get();
+                // Upcasting
+                List<JClass> trace = JavaUtil.getTraceBetween(classHierarchy, jsrc, jtgt);
+                if (trace != null && trace.size() > 1) {
+                    List<Integer> indexes = _getGEPIndexes4Trace(trace);
+                    List<LLVMValueRef> gepIndexes = indexes.stream().map(
+                            i -> codeGen.buildConstInt(codeGen.buildIntType(32), i)).toList();
+                    return codeGen.buildGEP(src, gepIndexes);
+                }
+                //Downcasting
+                List<JClass> reverseTrace = JavaUtil.getTraceBetween(classHierarchy, jtgt, jsrc);
+                if (reverseTrace != null && reverseTrace.size() > 1) {
+                    if (jsrc.isInterface()) {
+                        List<Integer> indexes = new ArrayList<>();
+                        indexes.add(0);
+                        indexes.add(0);
+                        List<LLVMValueRef> gepIndexes = indexes.stream().map(
+                                i -> codeGen.buildConstInt(codeGen.buildIntType(32), i)).toList();
+                        LLVMValueRef gepBack2This = codeGen.buildGEP(src, gepIndexes);
+                        LLVMValueRef thisPtr = codeGen.buildLoad(gepBack2This, "thisptr");
+                        if (!jtgt.isInterface()) {
+                            // Interface => Class: continue cast "this-field" to the target type
+                            return buildCast(thisPtr, tgtType);
+                        } else {
+                            // Interface => Interface:
+                            // TODO: implement it using pointer calculation
+                        }
+                    } else {
+                        // Class => Class: directly cast
+                    }
+                }
+            }
+        }
+        return codeGen.buildTypeCast(src, tgtType);
+    }
+
     public LLVMValueRef buildGEPtoContainerSlot(JClass jclass, JClass container, LLVMValueRef gepBase, Integer slotIndex) {
         List<JClass> trace = JavaUtil.getTraceBetween(classHierarchy, jclass, container);
+        List<Integer> indexes = _getGEPIndexes4Trace(trace);
+        indexes.add(slotIndex);
+        List<LLVMValueRef> gepIndexes = indexes.stream().map(
+                i -> codeGen.buildConstInt(codeGen.buildIntType(32), i)).toList();
+        return codeGen.buildGEP(gepBase, gepIndexes);
+    }
+
+    private List<Integer> _getGEPIndexes4Trace(List<JClass> trace) {
+        as.assertTrue(trace != null, "Trace should not be null");
         List<Integer> indexes = new ArrayList<>();
         indexes.add(0);
-        JClass lastClass = jclass;
+        JClass lastClass = trace.get(0);
         for (int i = 1; i < trace.size(); i++) {
             JClass curClass = trace.get(i);
             Integer index = null;
@@ -1525,10 +1621,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
             indexes.add(index);
             lastClass = curClass;
         }
-        indexes.add(slotIndex);
-        List<LLVMValueRef> gepIndexes = indexes.stream().map(
-                i -> codeGen.buildConstInt(codeGen.buildIntType(32), i)).toList();
-        return codeGen.buildGEP(gepBase, gepIndexes);
+        return indexes;
     }
 
     @Nullable

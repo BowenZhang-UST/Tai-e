@@ -26,10 +26,12 @@ public class Mappings {
     private static final AssertUtil as = new AssertUtil(logger);
 
     public HashMap<JClass, LLVMTypeRef> classMap;
+    public HashMap<LLVMTypeRef, JClass> reverseClassMap;
     public HashMap<JClass, ClassStatus> classStatusMap;
     public HashMap<JClass, Set<FieldRef>> classPhantomMemberFieldsMap;
     public HashMap<JMethod, LLVMValueRef> methodMap;
     public HashMap<Var, LLVMValueRef> varMap;
+    public HashMap<Var, LLVMValueRef> paramMap;
     public HashMap<JField, LLVMValueRef> staticFieldMap;
     public HashMap<JField, Integer> memberFieldMap;
     public HashMap<FieldRef, Integer> phantomMemberFieldMap;
@@ -40,10 +42,12 @@ public class Mappings {
 
     public Mappings() {
         this.classMap = new HashMap<>();
+        this.reverseClassMap = new HashMap<>();
         this.classStatusMap = new HashMap<>();
         this.classPhantomMemberFieldsMap = new HashMap<>();
         this.methodMap = new HashMap<>();
         this.varMap = new HashMap<>();
+        this.paramMap = new HashMap<>();
         this.staticFieldMap = new HashMap<>();
         this.memberFieldMap = new HashMap<>();
         this.phantomMemberFieldMap = new HashMap<>();
@@ -51,7 +55,6 @@ public class Mappings {
         this.slotIndexMap = new HashMap<>();
         this.stringPoolMap = new HashMap<>();
         this.stmtBlockMap = new HashMap<>();
-
 
     }
 
@@ -88,6 +91,17 @@ public class Mappings {
 
     public List<JClass> getAllClasses() {
         return getAllKeys(classMap);
+    }
+
+    /*
+     * Reverse Class map
+     */
+    public boolean setReverseClassMap(LLVMTypeRef llvmClass, JClass jclass) {
+        return setMap(reverseClassMap, llvmClass, jclass);
+    }
+
+    public Optional<JClass> getReverseClassMap(LLVMTypeRef llvmClass) {
+        return getFromMap(reverseClassMap, llvmClass);
     }
 
     /*
@@ -151,13 +165,25 @@ public class Mappings {
         return getFromMap(varMap, var);
     }
 
-    public List<Var> getAllVars() {
-        return getAllKeys(varMap);
-    }
-
     public void clearVarMap() {
         clearMap(varMap);
     }
+
+    /*
+     * Param map
+     */
+    public boolean setParamMap(Var var, LLVMValueRef llvmVal) {
+        return setMap(paramMap, var, llvmVal);
+    }
+
+    public Optional<LLVMValueRef> getParamMap(Var var) {
+        return getFromMap(paramMap, var);
+    }
+
+    public void clearParamMap() {
+        clearMap(paramMap);
+    }
+
 
     /*
      * Static field map.
