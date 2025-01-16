@@ -580,15 +580,19 @@ public class JellyFish extends ProgramAnalysis<Void> {
         // as well as the storing paths of virtual functions (if it's an init function)
         LLVMBasicBlockRef entryBlock = codeGen.addBasicBlock(llvmFunc, "entry");
         codeGen.setInsertBlock(entryBlock);
-        List<Var> paramVars = ir.getParams();
+        List<Var> paramVars = new ArrayList<>();
+        if (!jmethod.isStatic()) {
+            paramVars.add(ir.getThis());
+        }
+        paramVars.addAll(ir.getParams());
         for (Var var : ir.getVars()) {
             Type jvarType = var.getType();
             if (jvarType instanceof NullType) continue;
             LLVMTypeRef llvmVarType = tranType(jvarType, ClassStatus.DEP_FIELDS);
-            LLVMValueRef llvmVar;
             if (paramVars.contains(var)) {
                 int index = paramVars.indexOf(var);
                 LLVMValueRef param = LLVM.LLVMGetParam(llvmFunc, index);
+                logger.info("set param var: {} {}", var, getLLVMStr(param));
                 boolean ret = maps.setParamMap(var, param);
                 as.assertTrue(ret, "The var {} has been duplicate translated.", var);
             } else {
