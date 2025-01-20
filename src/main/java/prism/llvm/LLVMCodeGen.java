@@ -541,7 +541,7 @@ public class LLVMCodeGen {
         } else if (srcKind == LLVM.LLVMIntegerTypeKind && tgtKind == LLVM.LLVMPointerTypeKind) {
             LLVMValueRef cast = LLVM.LLVMBuildIntToPtr(builder, val, targetType, "int2ptr");
             return cast;
-        } else if (srcKind == LLVM.LLVMPointerTypeKind || tgtKind == LLVM.LLVMIntegerTypeKind) {
+        } else if (srcKind == LLVM.LLVMPointerTypeKind && tgtKind == LLVM.LLVMIntegerTypeKind) {
             LLVMValueRef cast = LLVM.LLVMBuildPtrToInt(builder, val, targetType, "ptr2int");
             return cast;
         }

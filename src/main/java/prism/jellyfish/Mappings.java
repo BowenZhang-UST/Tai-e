@@ -47,7 +47,6 @@ public class Mappings {
         this.classPhantomMemberFieldsMap = new HashMap<>();
         this.methodMap = new HashMap<>();
         this.varMap = new HashMap<>();
-        this.paramMap = new HashMap<>();
         this.staticFieldMap = new HashMap<>();
         this.memberFieldMap = new HashMap<>();
         this.phantomMemberFieldMap = new HashMap<>();
@@ -167,21 +166,6 @@ public class Mappings {
 
     public void clearVarMap() {
         clearMap(varMap);
-    }
-
-    /*
-     * Param map
-     */
-    public boolean setParamMap(Var var, LLVMValueRef llvmVal) {
-        return setMap(paramMap, var, llvmVal);
-    }
-
-    public Optional<LLVMValueRef> getParamMap(Var var) {
-        return getFromMap(paramMap, var);
-    }
-
-    public void clearParamMap() {
-        clearMap(paramMap);
     }
 
 

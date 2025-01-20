@@ -89,7 +89,7 @@ public class JavaUtil {
                 res = trace;
                 break;
             }
-            if (last.getSuperClass() != null) {
+            if (!last.isInterface() && last.getSuperClass() != null) {
                 List<JClass> trace2 = new ArrayList<>(trace);
                 trace2.add(last.getSuperClass());
                 worklist.add(trace2);

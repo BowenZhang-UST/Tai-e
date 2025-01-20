@@ -590,10 +590,12 @@ public class JellyFish extends ProgramAnalysis<Void> {
             if (jvarType instanceof NullType) continue;
             LLVMTypeRef llvmVarType = tranType(jvarType, ClassStatus.DEP_FIELDS);
             if (paramVars.contains(var)) {
+                String llvmVarName = StringUtil.getVarNameAsPtr(var);
                 int index = paramVars.indexOf(var);
                 LLVMValueRef param = LLVM.LLVMGetParam(llvmFunc, index);
-                logger.info("set param var: {} {}", var, getLLVMStr(param));
-                boolean ret = maps.setParamMap(var, param);
+                LLVMValueRef alloca = codeGen.buildAlloca(llvmVarType, llvmVarName);
+                codeGen.buildStore(alloca, param);
+                boolean ret = maps.setVarMap(var, alloca);
                 as.assertTrue(ret, "The var {} has been duplicate translated.", var);
             } else {
                 String llvmVarName = StringUtil.getVarNameAsPtr(var);
@@ -752,7 +754,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
 
         }
 
-        maps.clearParamMap();
         maps.clearVarMap();
         maps.clearStmtBlockMap();
 
@@ -982,7 +983,9 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMValueRef translatedVal = tranRValueImpl(jexp, Optional.of(outType));  // pass in as default type
         as.assertTrue(translatedVal != null, "We can't obtain a null value when using a default out type.");
 
-        return buildCast(translatedVal, outType); // It should be aware of the OO-features
+        LLVMValueRef res = buildCast(translatedVal, outType); // It should be aware of the OO-features
+        return res;
+
     }
 
     @Nullable
@@ -1378,18 +1381,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 return typedNullVal;
             } else {
                 Optional<LLVMValueRef> opVarPtr = maps.getVarMap((Var) jexp);
-                Optional<LLVMValueRef> opParam = maps.getParamMap((Var) jexp);
 
-                as.assertTrue(opVarPtr.isPresent() || opParam.isPresent(), "The variable {} has not been correctly handled", (Var) jexp);
-                if (opVarPtr.isPresent()) {
-                    LLVMValueRef ptr = opVarPtr.get();
-                    LLVMValueRef llvmVal = codeGen.buildLoad(ptr, StringUtil.getVarNameAsLoad((Var) jexp));
-                    return llvmVal;
-                } else {
-                    LLVMValueRef param = opParam.get();
-                    return param;
-                }
-
+                as.assertTrue(opVarPtr.isPresent(), "The variable {} has not been correctly handled", (Var) jexp);
+                LLVMValueRef ptr = opVarPtr.get();
+                LLVMValueRef llvmVal = codeGen.buildLoad(ptr, StringUtil.getVarNameAsLoad((Var) jexp));
+                return llvmVal;
             }
         } else if (jexp instanceof ArrayAccess) {
             /*
@@ -1470,16 +1466,10 @@ public class JellyFish extends ProgramAnalysis<Void> {
             as.assertFalse(jexp.getType() instanceof NullType, "It's not meaningful to have a null typed LValue: {}.", jexp);
 
             Optional<LLVMValueRef> opVarPtr = maps.getVarMap((Var) jexp);
-            Optional<LLVMValueRef> opParam = maps.getParamMap((Var) jexp);
 
-            as.assertTrue(opVarPtr.isPresent() || opParam.isPresent(), "The variable {} has not been correctly handled", jexp);
-            if (opVarPtr.isPresent()) {
-                LLVMValueRef ptr = opVarPtr.get();
-                return ptr;
-            } else {
-                LLVMValueRef param = opParam.get();
-                return param;
-            }
+            as.assertTrue(opVarPtr.isPresent(), "The variable {} has not been correctly handled", jexp);
+            LLVMValueRef ptr = opVarPtr.get();
+            return ptr;
         } else if (jexp instanceof ArrayAccess) {
             /*
              * T-L-ARRAY:
@@ -1584,8 +1574,8 @@ public class JellyFish extends ProgramAnalysis<Void> {
                         LLVMValueRef gepBack2This = codeGen.buildGEP(src, gepIndexes);
                         LLVMValueRef thisPtr = codeGen.buildLoad(gepBack2This, "thisptr");
                         if (!jtgt.isInterface()) {
-                            // Interface => Class: continue cast "this-field" to the target type
-                            return buildCast(thisPtr, tgtType);
+                            // Interface => Class: continue cast "this-field" from java.lang.Object to the target class type
+                            return codeGen.buildTypeCast(thisPtr, tgtType);
                         } else {
                             // Interface => Interface:
                             // TODO: implement it using pointer calculation
@@ -1613,10 +1603,11 @@ public class JellyFish extends ProgramAnalysis<Void> {
         List<Integer> indexes = new ArrayList<>();
         indexes.add(0);
         JClass lastClass = trace.get(0);
+        requireType(lastClass.getType(), ClassStatus.DEP_FIELDS);
         for (int i = 1; i < trace.size(); i++) {
             JClass curClass = trace.get(i);
+            requireType(curClass.getType(), ClassStatus.DEP_FIELDS);
             Integer index = null;
-            requireType(lastClass.getType(), ClassStatus.DEP_FIELDS);
             if (curClass == lastClass.getSuperClass()) {
                 index = 0;
             } else {
