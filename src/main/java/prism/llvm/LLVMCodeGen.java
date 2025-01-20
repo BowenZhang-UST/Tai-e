@@ -7,7 +7,6 @@ import org.bytedeco.llvm.global.LLVM;
 import pascal.taie.util.collection.Pair;
 import prism.jellyfish.util.ArrayBuilder;
 import prism.jellyfish.util.AssertUtil;
-import prism.jellyfish.util.StringUtil;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -170,7 +169,7 @@ public class LLVMCodeGen {
     }
 
     public LLVMValueRef buildConstString(String str) {
-        LLVMValueRef llvmStr = LLVM.LLVMBuildGlobalString(builder, str, "str");
+        LLVMValueRef llvmStr = LLVM.LLVMBuildGlobalString(builder, str, "jellyfish.str");
         return llvmStr;
     }
 
@@ -550,7 +549,7 @@ public class LLVMCodeGen {
     }
 
     public LLVMValueRef buildNop() {
-        // TODO: change it to intrisic.
+        // TODO: change it to intrinsic.
         return LLVM.LLVMConstNull(LLVM.LLVMInt1Type());
     }
 
@@ -829,8 +828,7 @@ public class LLVMCodeGen {
         return instanceOf;
     }
 
-    public LLVMValueRef buildClassIntrinsic(LLVMTypeRef classType, LLVMTypeRef javaClassType) {;
-
+    public LLVMValueRef buildClassIntrinsic(LLVMTypeRef classType, LLVMTypeRef javaClassType) {
         LLVMValueRef jellyfishClass = getOrCreateIntrinsic(IntrinsicID.JELLYFISH_CLASS, classType, javaClassType);
         LLVMValueRef classIntrinsic = buildCall(
                 jellyfishClass,

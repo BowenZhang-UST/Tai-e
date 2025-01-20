@@ -7,8 +7,6 @@ import pascal.taie.ir.proginfo.FieldRef;
 import pascal.taie.ir.proginfo.MethodRef;
 import pascal.taie.language.classes.JClass;
 
-import java.util.UUID;
-
 
 public class StringUtil {
     private static final Logger logger = LogManager.getLogger(StringUtil.class);
@@ -25,10 +23,10 @@ public class StringUtil {
 
     public static String getStaticFieldName(FieldRef fieldRef, boolean isPhantom) {
         as.assertTrue(fieldRef.isStatic(), "The field should be static");
-        String phantom = isPhantom ? "phantom." : "";
+        String prefix = isPhantom ? "phantom.static" : "static";
         String className = StringUtil.getClassName(fieldRef.getDeclaringClass());
 
-        return String.format("%s%s.%s", phantom, className, fieldRef.getName());
+        return String.format("%s.%s.%s", prefix, className, fieldRef.getName());
     }
 
     private static String getRealVarName(Var var) {
@@ -51,19 +49,6 @@ public class StringUtil {
 
     public static String getVarNameAsLoad(Var var) {
         return String.format("load.%s", getRealVarName(var));
-    }
-
-    public static String getAscii(String str) {
-        String res = "";
-        for (char c : str.toCharArray()) {
-            int ic = (int) c;
-            res += String.valueOf(ic);
-        }
-        return res;
-    }
-
-    public static String getUUID() {
-        return UUID.randomUUID().toString();
     }
 
 }

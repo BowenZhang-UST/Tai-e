@@ -83,18 +83,19 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 e.printStackTrace();
             }
         }
+        String projectName = getOptions().getString("project-name");
 
         // Set LLVMCodegen
         if (options.getAppClassPath().size() > 0) {
             String path2Jar = options.getAppClassPath().get(0);
             Path path = Paths.get(path2Jar);
             String jarFileName = path.getFileName().toString();
-            String outputPrefix = options.getOutputDir() + "/bc/" + jarFileName.substring(0, jarFileName.length() - 4) + "." + group;
+            String outputPrefix = options.getOutputDir() + "/bc/" + projectName + "." + group;
             this.codeGen = new LLVMCodeGen(path2Jar, outputPrefix);
         } else {
             String path2Cp = options.getClassPath().get(0);
             Path path = Paths.get(path2Cp);
-            String outputPrefix = options.getOutputDir() + "/bc/" + path.getFileName().toString() + "." + group;
+            String outputPrefix = options.getOutputDir() + "/bc/" + projectName + "." + group;
             this.codeGen = new LLVMCodeGen(path2Cp, outputPrefix);
         }
         Configurator.setAllLevels(LogManager.getRootLogger().getName(), DEBUG_LEVEL);
@@ -353,7 +354,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMTypeRef classType = codeGen.buildNamedStruct(className);
 
         // A placeholder value to let the type stay in bitcode.
-        String placeHolderValName = String.format("placeholder.%s", className);
+        String placeHolderValName = String.format("jellyfish.placeholder.%s", className);
         LLVMValueRef phValue = codeGen.addGlobalVariable(classType, placeHolderValName);
         LLVM.LLVMSetLinkage(phValue, LLVM.LLVMExternalWeakLinkage);
         return classType;
