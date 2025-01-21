@@ -17,14 +17,14 @@ public class StringUtil {
         return String.format("%s%s.%s", phantom, ref.getDeclaringClass().getName(), ref.getName());
     }
 
-    public static String getClassName(JClass jclass) {
-        return jclass.getName();
+    public static String getStructName(JClass jclass) {
+        return String.format("struct.%s", jclass.getName());
     }
 
     public static String getStaticFieldName(FieldRef fieldRef, boolean isPhantom) {
         as.assertTrue(fieldRef.isStatic(), "The field should be static");
         String prefix = isPhantom ? "phantom.static" : "static";
-        String className = StringUtil.getClassName(fieldRef.getDeclaringClass());
+        String className = fieldRef.getDeclaringClass().getName();
 
         return String.format("%s.%s.%s", prefix, className, fieldRef.getName());
     }

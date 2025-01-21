@@ -349,7 +349,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
      */
 
     public LLVMTypeRef tranClassDecl(JClass jclass) {
-        String className = StringUtil.getClassName(jclass);
+        String className = StringUtil.getStructName(jclass);
 
         LLVMTypeRef classType = codeGen.buildNamedStruct(className);
 
