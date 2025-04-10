@@ -520,6 +520,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 return curArrayPtrType;
             } else if (jType instanceof ClassType) {
                 JClass jclass = ((ClassType) jType).getJClass();
+                as.assertTrue(jclass != null, "jclass of {} is null", jType);
                 as.assertTrue(dep != null, "The dep should be specified. Got null.");
                 LLVMTypeRef llvmStruct = getOrTranClass(jclass, dep);
                 LLVMTypeRef llvmStructPtr = codeGen.buildPointerType(llvmStruct);
@@ -539,6 +540,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         LLVMTypeRef funcType = tranMethodType(jmethod.getRef());
 
         LLVMValueRef func = codeGen.addFunction(funcType, methodName);
+//        codeGen.setMethodDebugInfo(func, methodName, funcType);
         boolean ret = maps.setMethodMap(jmethod, func);
         as.assertTrue(ret, "The method {} has been duplicate translated.", jmethod);
 
@@ -554,6 +556,34 @@ public class JellyFish extends ProgramAnalysis<Void> {
         String name = StringUtil.getStaticFieldName(ref, true);
         LLVMTypeRef type = tranType(ref.getType(), ClassStatus.DEP_DECL);
         return codeGen.addGlobalVariable(type, name);
+    }
+
+    private void setFuncptrs(JMethod init, LLVMBasicBlockRef block) {
+        as.assertTrue(init.getName().equals("<init>"), "It only works in <init>");
+        codeGen.setInsertBlock(block);
+        JClass jclass = init.getDeclaringClass();
+        Var thisVar = init.getIR().getThis();
+        LLVMValueRef thisPtr = tranRValue(thisVar, tranType(jclass.getType(), ClassStatus.DEP_METHOD_DECL));
+        for (JMethod owned : JavaUtil.getOwnedMethods(classHierarchy, jclass)) {
+            Subsignature sig = owned.getSubsignature();
+            List<JClass> toStores = synRes.getStoreContainers(jclass, sig, classHierarchy);
+            for (JClass toStore : toStores) {
+                requireType(toStore.getType(), ClassStatus.DEP_FIELDS);
+                Optional<Integer> lastIndex = maps.getSlotIndexMap(toStore, sig);
+                as.assertTrue(lastIndex.isPresent(), "The container {} should have a slot for sig {}", toStore.getName(), sig);
+                LLVMValueRef gep2Slot = buildGEPtoContainerSlot(jclass, toStore, thisPtr, lastIndex.get());
+                requireType(owned.getDeclaringClass().getType(), ClassStatus.DEP_METHOD_DECL);
+                LLVMValueRef funcPtr = maps.getMethodMap(owned).get();
+                LLVMTypeRef tarFuncPtrType = LLVM.LLVMGetElementType(getValueType(gep2Slot));
+                codeGen.buildStore(gep2Slot, codeGen.buildTypeCast(funcPtr, tarFuncPtrType));
+            }
+        }
+        for (JClass face : JavaUtil.getAllInterfacesOf(jclass).toList()) {
+            LLVMValueRef gep2ThisField = buildGEPtoContainerSlot(jclass, face, thisPtr, 0);
+            JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
+            LLVMTypeRef llvmObjClass = tranType(objClass.getType(), ClassStatus.DEP_FIELDS);
+            codeGen.buildStore(gep2ThisField, codeGen.buildTypeCast(thisPtr, llvmObjClass));
+        }
     }
 
     public void tranMethodBody(JMethod jmethod) {
@@ -604,33 +634,6 @@ public class JellyFish extends ProgramAnalysis<Void> {
                 boolean ret = maps.setVarMap(var, alloca);
                 as.assertTrue(ret, "The var {} has been duplicate translated.", var);
             }
-
-        }
-        if (jmethod.getName().equals("<init>")) {
-            JClass jclass = jmethod.getDeclaringClass();
-            Var thisVar = ir.getThis();
-            LLVMValueRef thisPtr = tranRValue(thisVar, tranType(jclass.getType(), ClassStatus.DEP_METHOD_DECL));
-            for (JMethod owned : JavaUtil.getOwnedMethods(classHierarchy, jclass)) {
-                Subsignature sig = owned.getSubsignature();
-                List<JClass> toStores = synRes.getStoreContainers(jclass, sig, classHierarchy);
-                for (JClass toStore : toStores) {
-                    requireType(toStore.getType(), ClassStatus.DEP_FIELDS);
-                    Optional<Integer> lastIndex = maps.getSlotIndexMap(toStore, sig);
-                    as.assertTrue(lastIndex.isPresent(), "The container {} should have a slot for sig {}", toStore.getName(), sig);
-                    LLVMValueRef gep2Slot = buildGEPtoContainerSlot(jclass, toStore, thisPtr, lastIndex.get());
-                    requireType(owned.getDeclaringClass().getType(), ClassStatus.DEP_METHOD_DECL);
-                    LLVMValueRef funcPtr = maps.getMethodMap(owned).get();
-                    LLVMTypeRef tarFuncPtrType = LLVM.LLVMGetElementType(getValueType(gep2Slot));
-                    codeGen.buildStore(gep2Slot, codeGen.buildTypeCast(funcPtr, tarFuncPtrType));
-                }
-            }
-            for (JClass face : JavaUtil.getAllInterfacesOf(jclass).toList()) {
-                LLVMValueRef gep2ThisField = buildGEPtoContainerSlot(jclass, face, thisPtr, 0);
-                JClass objClass = world.getClassHierarchy().getClass("java.lang.Object");
-                LLVMTypeRef llvmObjClass = tranType(objClass.getType(), ClassStatus.DEP_FIELDS);
-                codeGen.buildStore(gep2ThisField, codeGen.buildTypeCast(thisPtr, llvmObjClass));
-            }
-
         }
 
         // We allocate an exit block for the exit stmt in CFG, which is added by Tai-e.
@@ -644,6 +647,7 @@ public class JellyFish extends ProgramAnalysis<Void> {
         for (Stmt jstmt : jstmts) {
             LLVMBasicBlockRef bb = codeGen.addBasicBlock(llvmFunc, "bb");
             maps.setStmtBlockMap(jstmt, bb);
+
         }
         // Statement translation:
         // In this process,
@@ -652,9 +656,25 @@ public class JellyFish extends ProgramAnalysis<Void> {
             LLVMBasicBlockRef bb = maps.getStmtBlockMap(jstmt).get();
             codeGen.setInsertBlock(bb);
             List<LLVMValueRef> llvmInsts = this.tranStmt(jstmt, jmethod, cfg);
-
             List<String> llvmInstStrs = llvmInsts.stream().map(inst -> getLLVMStr(inst)).toList();
         }
+
+        // Set function pointer for <init>() method
+        if(jmethod.getName().equals("<init>")) {
+            LLVMBasicBlockRef bb4SettingFuncptr = entryBlock;
+            if(!jstmts.isEmpty()) {
+                Stmt first = jstmts.get(0);
+                if(first instanceof Invoke) {
+                    String calledName = ((Invoke) first).getMethodRef().getName();
+                    if(calledName.equals("<init>")) {
+                        // We should set function pointer after the super.<init>()
+                        bb4SettingFuncptr = maps.getStmtBlockMap(first).get();
+                    }
+                }
+            }
+            setFuncptrs(jmethod, bb4SettingFuncptr);
+        }
+
         // The exit stmt is a nop.
         // So we should add an unreachable to the corresponding BB,
         // Such that there is a terminator.

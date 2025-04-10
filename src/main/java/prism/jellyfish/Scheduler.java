@@ -29,25 +29,29 @@ public class Scheduler extends ProgramAnalysis<Void> {
 
     public Void analyze() {
         World world = World.get();
-        Integer N = getOptions().getInt("threads");
-        logger.info("Jellyfish Scheduler. Threads = {}", N);
+        Integer classesPerGroup = getOptions().getInt("classes-per-group");
+        logger.info("Jellyfish Scheduler. Classes Per Group = {}", classesPerGroup);
         Options options = world.getOptions();
         List<List<String>> groups = new ArrayList<>();
-
-        for (int i = 0; i < N; i++) {
-            List<String> group = new ArrayList<>();
-            groups.add(group);
-        }
+        groups.add(new ArrayList<>());
 
         List<JClass> allClasses = world.getClassHierarchy().applicationClasses().toList();
         int count = 0;
-        for (JClass jclass : allClasses) {
+        int curGroup = 0;
+        for(JClass jclass : allClasses) {
             String className = jclass.getName();
-            groups.get(count % N).add(className);
-            count++;
+            groups.get(curGroup).add(className);
+            count += 1;
+
+            if(count == classesPerGroup) {
+                groups.add(new ArrayList<>());
+                count = 0;
+                curGroup += 1;
+            }
         }
 
-        for (int i = 0; i < N; i++) {
+
+        for (int i = 0; i < groups.size(); i++) {
             List<String> group = groups.get(i);
             String filePath = options.getOutputDir().toString() + "/groups/" + (i + 1);
             try (BufferedWriter writer = new BufferedWriter(new FileWriter(filePath))) {

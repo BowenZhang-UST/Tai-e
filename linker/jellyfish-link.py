@@ -1,4 +1,5 @@
 import argparse
+from tkinter import Y
 from typing import Dict, List, Tuple, Set
 import re
 import glob
@@ -89,7 +90,6 @@ def _original_func_name(name: str) -> str:
         name = name[0:rdot_pos]
     return name
 
-
 def _wrap_func_name(s: str) -> str:
     special_chars = ["<", ">", "$", "#"]
     for c in special_chars:
@@ -97,14 +97,13 @@ def _wrap_func_name(s: str) -> str:
             return f'"{s}"'
     return s
 
-
 def _simutaneous_replace(s: str, replacements: dict):
     """
     multi-substring replacement (efficient one)
     https://gist.github.com/bgusach/a967e0587d6e01e889fd1d776c5f3729
     """
     if not replacements:
-        return string
+        return s
 
     replacements = {key: val for key, val in replacements.items()}
 

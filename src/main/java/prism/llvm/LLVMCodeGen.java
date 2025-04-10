@@ -2,6 +2,7 @@ package prism.llvm;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.bytedeco.javacpp.PointerPointer;
 import org.bytedeco.llvm.LLVM.*;
 import org.bytedeco.llvm.global.LLVM;
 import pascal.taie.util.collection.Pair;
@@ -25,6 +26,9 @@ public class LLVMCodeGen {
     LLVMContextRef context;
     LLVMModuleRef module;
     LLVMBuilderRef builder;
+    LLVMDIBuilderRef diBuilder;
+    LLVMMetadataRef compileUnit;
+    LLVMMetadataRef diFile;
 
     private static final Logger logger = LogManager.getLogger(LLVMCodeGen.class);
     private static final AssertUtil as = new AssertUtil(logger);
@@ -35,6 +39,11 @@ public class LLVMCodeGen {
         this.context = LLVM.LLVMContextCreate();
         this.module = LLVM.LLVMModuleCreateWithNameInContext(moduleName, context);
         this.builder = LLVM.LLVMCreateBuilderInContext(context);
+        this.diBuilder = LLVM.LLVMCreateDIBuilder(module);
+        this.diFile = LLVM.LLVMDIBuilderCreateFile(diBuilder, moduleName, moduleName.length(), "", 0);
+        this.compileUnit = LLVM.LLVMDIBuilderCreateCompileUnit(diBuilder, LLVM.LLVMDWARFSourceLanguageJava, diFile, "jellyfish", 9, 0, "", 0, 0, "", 0, 0, 0, 0, 0, "", 0, "", 0);
+        LLVM.LLVMAddModuleFlag(module, LLVM.LLVMModuleFlagBehaviorWarning, "Debug Info Version", 18, LLVM.LLVMValueAsMetadata(buildConstInt(buildIntType(32), LLVM.LLVMDebugMetadataVersion())));
+        LLVM.LLVMAddModuleFlag(module, LLVM.LLVMModuleFlagBehaviorWarning, "Dwarf Version", 13, LLVM.LLVMValueAsMetadata(buildConstInt(buildIntType(32), 4)));
         LLVM.LLVMInitializeCore(LLVM.LLVMGetGlobalPassRegistry());
         LLVM.LLVMInitializeScalarOpts(LLVM.LLVMGetGlobalPassRegistry());
     }
@@ -91,6 +100,15 @@ public class LLVMCodeGen {
         // Insert an instruction to the current insertion block
         LLVM.LLVMInsertIntoBuilder(builder, inst);
 
+    }
+
+    public void setMethodDebugInfo(LLVMValueRef func, String methodName, LLVMTypeRef funcType) {
+        int line = 0;
+        LLVMMetadataRef[] paramTypes = new LLVMMetadataRef[]{};
+        PointerPointer<LLVMMetadataRef> paramTypesPointer = new PointerPointer<>(paramTypes);
+        LLVMMetadataRef diFuncType = LLVM.LLVMDIBuilderCreateSubroutineType(diBuilder,diFile, paramTypesPointer,0,0);
+        LLVMMetadataRef diFunc = LLVM.LLVMDIBuilderCreateFunction(diBuilder, compileUnit, methodName, methodName.length(), methodName, methodName.length(), diFile, line, diFuncType, 1, 1, line, 0, 0);
+        LLVM.LLVMGlobalSetMetadata(func, 0, diFunc);
     }
 
     public void setDebugLocation(int line, String className) {

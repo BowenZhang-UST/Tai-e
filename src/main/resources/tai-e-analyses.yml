@@ -174,7 +174,7 @@
   id: jelly-scheduler
   requires: [ jelly-synthesizer ]
   options:
-    threads: 1
+    classes-per-group: 100
 
 - description: Jellyfish Synthesizer
   analysisClass: prism.jellyfish.Synthesizer
