@@ -35,6 +35,11 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.junit.platform:junit-platform-suite")
 
+    // Jellyfish Dependencies:
+    // LLVM
+    implementation("org.bytedeco:llvm-platform:12.0.1-1.5.6")
+    // Gson
+    implementation("com.google.code.gson:gson:2.11.0")
 }
 
 application {
