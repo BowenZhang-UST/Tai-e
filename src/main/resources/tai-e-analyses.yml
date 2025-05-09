@@ -164,20 +164,24 @@
 
 - description: Jellyfish Transpiler
   analysisClass: prism.jellyfish.JellyFish
-  id: jelly-fish
+  id: jellyfish-translator
   requires: [ cfg ]
   options:
     group-to-translate: 0 # a file including a group of classes to translate
     project-name: project # output project name
+    session-id: null
 
 - description: Jellyfish Scheduler
   analysisClass: prism.jellyfish.Scheduler
-  id: jelly-scheduler
-  requires: [ jelly-synthesizer ]
+  id: jellyfish-scheduler
+  requires: [ ]
   options:
     classes-per-group: 100
+    session-id: null
 
 - description: Jellyfish Synthesizer
   analysisClass: prism.jellyfish.Synthesizer
-  id: jelly-synthesizer
+  id: jellyfish-synthesizer
   requires: [ ]
+  options:
+    session-id: null
