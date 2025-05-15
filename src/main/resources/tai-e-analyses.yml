@@ -170,6 +170,7 @@
     group-to-translate: 0 # a file including a group of classes to translate
     project-name: project # output project name
     session-id: null
+    with-debug-info: false
 
 - description: Jellyfish Scheduler
   analysisClass: prism.jellyfish.Scheduler
