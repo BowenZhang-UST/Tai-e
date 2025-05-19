@@ -177,7 +177,8 @@
   id: jellyfish-scheduler
   requires: [ ]
   options:
-    classes-per-group: 100
+    stmts-per-group: 80000
+    threads: 1
     session-id: null
 
 - description: Jellyfish Synthesizer
