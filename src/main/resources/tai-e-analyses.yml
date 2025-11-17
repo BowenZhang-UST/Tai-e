@@ -194,9 +194,10 @@
     session-id: null
 
 
-- decription: Jellyfish Coverage Analyzer
+- description: Jellyfish Coverage Analyzer
   analysisClass: prism.coverage.Coverage
   id: jellyfish-coverage
   requires: [ ]
   options:
     session-id: null
+    output-file: null
